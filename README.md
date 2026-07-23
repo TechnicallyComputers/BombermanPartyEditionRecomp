@@ -60,7 +60,31 @@ Clone with submodules:
 git clone --recurse-submodules https://github.com/TechnicallyComputers/BombermanPartyEditionRecomp.git
 ```
 
+## 5-player / netplay
+
+This title opts into five pads at **compile time**:
+
+```cmake
+psxrecomp_add_runtime_target(psx-runtime
+    ...
+    MAX_PLAYERS 5
+)
+```
+
+That bakes `PSX_MAX_PLAYERS=5`. `game.toml` keeps `players = 5` for lobby
+`max_slots` and launcher controller cards. Games that omit `MAX_PLAYERS`
+stay at the framework default of **2** (MotK).
+
+Multitap (SCPH-1070 on port 1 + pad on port 2) is enabled when a netplay
+session uses 3+ slots.
+
+## Framework pin
+
+Nested `psxrecomp` tracks `feat/max-players-5` (local tip includes multitap +
+`MAX_PLAYERS`). Nested `lib/recomp-net` / `lib/recomp-ui` track the 5-slot
+feature tips. Lobby server counterpart: `recomp-net-server` `feat/max-slots-5`.
+
 ## Status
 
-Repo scaffold only. Disc prepare + EXE extract work locally; recompiler
-seeds / `generated/` and netplay bring-up are next.
+Generated game C + Release/`MAX_PLAYERS 5` runtime build. LLE boot reaches the
+SCEA license screen; title/menu bring-up continues — see `ISSUES.md`.

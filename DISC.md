@@ -46,8 +46,11 @@ Produced by `tools/prepare_disc.py` (sync→LBA map, user@sync+21 → MODE2/2352
 |-------|-------|
 | Path | `bpe/Bomberman Party Edition.bin` |
 | Size | 660,775,584 bytes (280,942 × 2352) |
-| MD5 | `13e03b0cfc4c5dfec77f64cd5f31486e` |
-| SHA-1 | `16b9409c9c54b995c2bf39bf138c8e9f9405f8bb` |
+| MD5 | `74c5fbb8b2ca87b2f1d0f0c292241c03` |
+| SHA-1 | `85c30e5da35c8d737b049079d8e72b7d3a45eb05` |
+
+`prepare_disc.py` also **packs the ISO9660 root directory** (source has
+mid-sector zero padding that stops a real BIOS walker before `SLUS_011.89`).
 
 ## Recreate `bpe/` from the source dump
 

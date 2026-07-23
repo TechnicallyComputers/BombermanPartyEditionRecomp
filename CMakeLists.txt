@@ -52,4 +52,5 @@ psxrecomp_add_runtime_target(psx-runtime
     DEFAULT_GAME_CONFIG_PATH "game.toml"
     LAUNCHER_BOXART "${CMAKE_CURRENT_SOURCE_DIR}/launcher_assets/img/boxart.tga"
     GAME_VERSION "${PSX_GAME_VERSION}"
+    MAX_PLAYERS 5
 )

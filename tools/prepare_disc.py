@@ -185,6 +185,73 @@ def write_bin(
     return n, missing
 
 
+def pack_root_directory(
+    bin_path: str, root_extent: int, entries: dict[str, tuple[int, int]]
+) -> None:
+    """Rewrite the ISO9660 root as contiguous MODE2/2352 user payloads.
+
+    The irregular source dump inserts zero runs inside the root sector. BIOS
+    directory walkers treat a zero record length as end-of-directory, so files
+    after the hole (including ``SLUS_011.89``) are invisible until we pack.
+    """
+    with open(bin_path, "r+b") as f:
+        def read_user(lba: int) -> bytes:
+            f.seek(lba * DST_SEC + 24)
+            return f.read(USER)
+
+        def write_user(lba: int, user: bytes) -> None:
+            if len(user) != USER:
+                user = user.ljust(USER, b"\x00")[:USER]
+            f.seek(lba * DST_SEC + 24)
+            f.write(user)
+
+        orig = read_user(root_extent)
+        if not orig or orig[0] < 34:
+            raise SystemExit("root directory sector unreadable for pack")
+        dot = orig[0 : orig[0]]
+        ddot = orig[orig[0] : orig[0] + orig[orig[0]]]
+
+        # Rebuild minimal dirents from the name→(extent,size) map already parsed
+        # from the quirky source (plus . / ..).
+        packed = bytearray()
+        packed += dot
+        packed += ddot
+        for name in sorted(entries):
+            extent, size = entries[name]
+            name_bytes = (name + ";1").encode("ascii")
+            namelen = len(name_bytes)
+            reclen = 33 + namelen
+            if reclen % 2:
+                reclen += 1
+            if (len(packed) % USER) + reclen > USER:
+                packed += b"\x00" * (USER - (len(packed) % USER))
+            rec = bytearray(reclen)
+            rec[0] = reclen
+            struct.pack_into("<I", rec, 2, extent)
+            struct.pack_into(">I", rec, 6, extent)
+            struct.pack_into("<I", rec, 10, size)
+            struct.pack_into(">I", rec, 14, size)
+            rec[25] = 0  # file
+            rec[32] = namelen
+            rec[33 : 33 + namelen] = name_bytes
+            packed += rec
+        while len(packed) % USER:
+            packed += b"\x00"
+        nsec = len(packed) // USER
+        for i in range(nsec):
+            write_user(root_extent + i, bytes(packed[i * USER : (i + 1) * USER]))
+
+        # Keep PVD root size in sync (both endian fields).
+        pvd = bytearray(read_user(16))
+        struct.pack_into("<I", pvd, 166, len(packed))
+        struct.pack_into(">I", pvd, 170, len(packed))
+        write_user(16, bytes(pvd))
+        print(
+            f"  packed root directory at LBA {root_extent} "
+            f"({len(entries)} files, {len(packed)} bytes)"
+        )
+
+
 def write_cue(out_dir: str) -> None:
     cue_path = os.path.join(out_dir, CUE_NAME)
     with open(cue_path, "w", encoding="utf-8") as c:
@@ -262,6 +329,10 @@ def main() -> int:
     print(f"writing {bin_path} …")
     n_sec, missing = write_bin(data, lba_map, bin_path)
     print(f"  {n_sec} sectors ({n_sec * DST_SEC} bytes), {missing} gap sectors zero-filled")
+    # Source root dirents are split by mid-sector zero padding; a real BIOS
+    # ISO9660 walker stops at the first zero and never sees SLUS_011.89.
+    # Repack the root so HLE boot-skip / LLE shell can LoadExe from disc.
+    pack_root_directory(bin_path, root_extent, entries)
     write_cue(args.out_dir)
 
     bin_md5, bin_sha1, bin_size = file_hashes(bin_path)
