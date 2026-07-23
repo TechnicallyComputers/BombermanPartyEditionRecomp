@@ -81,8 +81,9 @@ session uses 3+ slots.
 ## Framework pin
 
 Nested `psxrecomp` tracks `feat/max-players-5` (local tip includes multitap +
-`MAX_PLAYERS`). Nested `lib/recomp-net` / `lib/recomp-ui` track the 5-slot
-feature tips. Lobby server counterpart: `recomp-net-server` `feat/max-slots-5`.
+`MAX_PLAYERS`) and keeps **`lib/recomp-net` only**. The Dear ImGui launcher is
+the repo-root **`recomp-ui`** submodule. Lobby server counterpart:
+`recomp-net-server` `feat/max-slots-5`.
 
 ## Status
 

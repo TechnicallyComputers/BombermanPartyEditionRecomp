@@ -24,6 +24,10 @@ message(STATUS "BPE lobby game_version: ${PSX_GAME_VERSION} (from VERSION=${BPE_
 set(PSXRECOMP_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/psxrecomp" CACHE PATH
     "Path to psxrecomp")
 
+# Game-root recomp-ui (not under psxrecomp/lib/).
+set(RECOMP_UI_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/recomp-ui" CACHE PATH
+    "Path to recomp-ui launcher" FORCE)
+
 # Prefer the framework-vendored recomp-net submodule (CI recursive checkout).
 if(NOT RECOMP_NET_ROOT AND EXISTS "${PSXRECOMP_ROOT}/lib/recomp-net/CMakeLists.txt")
     set(RECOMP_NET_ROOT "${PSXRECOMP_ROOT}/lib/recomp-net" CACHE PATH
