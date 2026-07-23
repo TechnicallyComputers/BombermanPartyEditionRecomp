@@ -1,0 +1,4 @@
+# Function-start seeds for Bomberman Party Edition (SLUS-01189).
+# One address per line (hex). Entry PC is required; expand via Ghidra /
+# runtime miss sampling as bring-up progresses.
+0x800785D8

@@ -1,0 +1,37 @@
+[game]
+name = "Bomberman Party Edition"
+id = "SLUS-01189"
+players = 5
+exe = "bpe/SLUS_011.89"
+disc = "bpe/Bomberman Party Edition.bin"
+load_address = "0x80010000"
+entry_pc = "0x800785D8"
+text_size = "0x00083800"
+stack_base = "0x801FFFF0"
+
+[recompiler]
+seeds = "seeds/ghidra_funcs.txt"
+out_dir = "generated"
+strict = true
+
+[runtime]
+debug_port = 4530
+window_title = "Bomberman Party Edition Recompiled"
+memcard_dir = "saves"
+disc_speed = "4x"
+bios_hle = true
+bios_hle_keep_intro = false
+fast_boot = false
+overlay_cache = true
+overlay_backend = "auto"
+turbo_loads = true
+turbo_audio_sink = true
+idle_skip = true
+
+[video]
+renderer = "opengl"
+aspect_ratio = "4:3"
+
+[controller]
+default_mode = "digital"
+allow_hybrid = false

@@ -1,0 +1,61 @@
+# Build outputs
+/build/
+/build-*/
+/out/
+/.happypath/
+
+# Recompiler output is tracked in this private game repo so CI can build
+# without a disc. Regenerate with psxrecomp-game when seeds/overlays change.
+# (Still never commit BIOS / disc images — see /bpe/ and /bios/ below.)
+
+# Release packaging artifacts
+/release-stage/
+/dist/
+*.zip
+
+# Local PlayStation assets (disc image, extracted boot EXE, memory cards)
+/bpe/
+/isos/
+/saves/
+
+# Disc / image / memcard formats
+*.bin
+*.cue
+*.iso
+*.img
+*.sub
+*.ccd
+*.mcd
+*.mcr
+*.chd
+
+# Ghidra projects and local analysis databases
+/ghidra/projects/
+*.gpr
+*.rep/
+*.lock
+*.lock~
+
+# Local editor / cache files
+.vs/
+.vscode/
+*.user
+*.log
+
+# Runtime artifacts from psx-runtime launches
+psx_crash.txt
+psx_last_run_report.json
+psx_screenshot.bmp
+psx_freeze_heartbeat.json
+starvation_dump.jsonl
+
+# Diagnostic dumps from debug-server probes (root-level only)
+/*.json
+/*.bmp
+/*.png
+
+# Python caches
+__pycache__/
+
+# Local BIOS (symlink or copy — do not commit)
+/bios/
