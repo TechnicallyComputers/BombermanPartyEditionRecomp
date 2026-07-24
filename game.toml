@@ -3,9 +3,9 @@ name = "Bomberman Party Edition"
 id = "SLUS-01189"
 players = 5
 exe = "bpe/SLUS_011.89"
-disc = "bpe/Bomberman Party Edition.bin"
+disc = "bpe/Bomberman Party Edition.cue"
 load_address = "0x80010000"
-entry_pc = "0x80078638"
+entry_pc = "0x800785D8"
 text_size = "0x00083800"
 stack_base = "0x801FFFF0"
 

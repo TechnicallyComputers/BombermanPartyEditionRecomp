@@ -7,15 +7,9 @@ Local-only dump. **Do not commit** the disc image or extracted EXE.
 | Title | Bomberman Party Edition (USA) |
 | Serial | SLUS-01189 |
 | Boot EXE | `SLUS_011.89` |
-| Source path | `/mnt/crucial4tb/Emulation/roms/ps/Bomberman Party Edition.iso` |
-| Source format | Irregular raw CD (sync marks not MotK-style aligned 2448-from-0) |
-| Working format | `bpe/*.bin` + `bpe/*.cue` — rebuilt MODE2/2352 |
-
-## Dump quirk
-
-Sync marks are irregular. Map sectors by CD sync + MSF→LBA. User data for
-this dump starts at **sync+21** (not +24). `tools/prepare_disc.py` rebuilds
-standard MODE2/2352 sectors from the 2048-byte user payloads.
+| Source path | `/mnt/crucial4tb/Emulation/roms/ps/Bomberman - Party Edition (USA)/Bomberman - Party Edition (USA).{bin,cue}` |
+| Source format | Redump MODE2/2352 ([redump.org/disc/10806](http://redump.org/disc/10806/)) |
+| Working format | `bpe/*.bin` + `bpe/*.cue` — copy of Redump |
 
 ## Boot EXE (from `SYSTEM.CNF` + PS-X EXE header)
 
@@ -28,32 +22,36 @@ standard MODE2/2352 sectors from the 2048-byte user payloads.
 | Entry PC | `0x800785D8` |
 | Text size | `0x00083800` |
 | Stack (`SYSTEM.CNF`) | `0x801FFF00` |
-| Stack (EXE header / `game.toml`) | `0x801FFFF0` |
+| Stack (`game.toml`) | `0x801FFFF0` |
 
-## Source image (as found)
+## Redump track
 
 | Field | Value |
 |-------|-------|
-| Size | 645,566,976 bytes |
-| MD5 | `054204cd016afb3c56fd9e1eea80676e` |
-| SHA-1 | `306888eee5bf95cb3cabd3a40cd836063887ab77` |
+| Sectors | 280,940 |
+| Size | 660,770,880 |
+| MD5 | `e0ceba6e448677f3d938b1dd176be3af` |
+| SHA-1 | `53a509dbe859f773856f26d966f5edacbc701b4e` |
+| CRC-32 | `98275a08` |
 
-## Local working image (2352)
+## Working image (`bpe/`)
 
-Produced by `tools/prepare_disc.py` (sync→LBA map, user@sync+21 → MODE2/2352).
+Produced by `tools/prepare_disc.py` (copy + extract; no sector rebuild, no EXE patches).
 
 | Field | Value |
 |-------|-------|
 | Path | `bpe/Bomberman Party Edition.bin` |
-| Size | 660,775,584 bytes (280,942 × 2352) |
-| MD5 | `74c5fbb8b2ca87b2f1d0f0c292241c03` |
-| SHA-1 | `85c30e5da35c8d737b049079d8e72b7d3a45eb05` |
+| Size / hashes | same as Redump above |
+| EXE MD5 | `35d48773d79a784614dcfa45b9df8f04` |
 
-`prepare_disc.py` also **packs the ISO9660 root directory** (source has
-mid-sector zero padding that stops a real BIOS walker before `SLUS_011.89`).
-
-## Recreate `bpe/` from the source dump
+## Recreate `bpe/` from Redump
 
 ```bash
 python3 tools/prepare_disc.py
+# or:
+python3 tools/prepare_disc.py "/path/to/Bomberman - Party Edition (USA).bin"
 ```
+
+## Note on the old dump
+
+An earlier irregular `.iso` (`Bomberman Party Edition.iso`, MD5 `054204cd…`) was **not** Redump and produced a heavily corrupted `SLUS_011.89` (~190k byte diffs vs Redump). Do not use it.

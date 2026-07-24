@@ -17,15 +17,13 @@ Holds game config, seeds, build glue, and (for private CI) recompiler
 | `generated/` | Recompiler output (tracked for CI; regenerate when seeds change) |
 | `VERSION` | Release / lobby match pin (e.g. `0.1.0`) |
 | `DISC.md` | Disc identity + hashes |
-| `tools/prepare_disc.py` | Rebuild `bpe/` from the source dump |
+| `tools/prepare_disc.py` | Install Redump disc + extract boot EXE into `bpe/` |
 
 ## Disc
 
-Source dump (irregular raw CD with subchannel; see `DISC.md`):
+Use the Redump USA image (see `DISC.md`):
 
-`/mnt/crucial4tb/Emulation/roms/ps/Bomberman Party Edition.iso`
-
-Working image for the runtime is MODE2/2352 under `bpe/`. Recreate with:
+`/mnt/crucial4tb/Emulation/roms/ps/Bomberman - Party Edition (USA)/`
 
 ```bash
 python3 tools/prepare_disc.py
