@@ -3,7 +3,7 @@ name = "Bomberman Party Edition"
 id = "SLUS-01189"
 players = 5
 exe = "bpe/SLUS_011.89"
-disc = "bpe/Bomberman Party Edition.cue"
+disc = "bpe/Bomberman Party Edition.bin"
 load_address = "0x80010000"
 entry_pc = "0x800785D8"
 text_size = "0x00083800"
@@ -13,19 +13,13 @@ stack_base = "0x801FFFF0"
 seeds = "seeds/ghidra_funcs.txt"
 out_dir = "generated"
 strict = true
-# whole-image treats the word after every jr $ra as a function start. BPE's
-# rsin/literal pool begins at 0x80082AF8 (jr $ra at 0x80082AF0 + 8) and was
-# coalesced into one 0x10D08-byte "function" that executes table words as
-# jal → FAIL-FAST at 0x8D5FEDCC. Reachable-only keeps data out of codegen.
-discovery = "reachable"
 
 [runtime]
 debug_port = 4530
 window_title = "Bomberman Party Edition Recompiled"
 memcard_dir = "saves"
 disc_speed = "4x"
-# LLE until BPE boot/libgpu bring-up is solid; HLE boot-skip still blacks out.
-bios_hle = false
+bios_hle = true
 bios_hle_keep_intro = false
 fast_boot = false
 overlay_cache = true
