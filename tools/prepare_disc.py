@@ -1,15 +1,12 @@
 #!/usr/bin/env python3
-"""Rebuild Bomberman Party Edition working disc image from the irregular source dump.
+"""Install Redump Bomberman Party Edition (USA) into bpe/ and extract the boot EXE.
 
-The source dump is NOT MotK-style aligned 2448-from-0. Sync marks are irregular.
-Sectors are located by CD sync + MSF→LBA. User data starts at sync+21 (not +24).
-This tool:
+Source is a verified Redump MODE2/2352 image (SLUS-01189). No sector rebuild and
+no MotK-shaped EXE retargets — the previous irregular dump was corrupt.
 
-  1. Maps every sync → LBA via the 3-byte MSF header
-  2. Reads 2048-byte user payloads at sync+21
-  3. Parses ISO9660 (tolerating mid-sector zero padding / odd dirents)
-  4. Extracts SYSTEM.CNF + SLUS_011.89
-  5. Writes a standard MODE2/2352 .bin + .cue under bpe/
+  1. Copies .bin + writes a matching .cue under bpe/
+  2. Parses ISO9660 from standard MODE2 Form1 user data (sync+24)
+  3. Extracts SYSTEM.CNF + SLUS_011.89 unchanged
 """
 
 from __future__ import annotations
@@ -17,41 +14,28 @@ from __future__ import annotations
 import argparse
 import hashlib
 import os
+import shutil
 import struct
 import sys
 
 DST_SEC = 2352
 USER = 2048
-USER_OFF = 21  # dump quirk: user payload at sync+21, not +24
+USER_OFF = 24  # standard MODE2 Form1
 SYNC = bytes([0x00] + [0xFF] * 10 + [0x00])
 
-DEFAULT_SRC = "/mnt/crucial4tb/Emulation/roms/ps/Bomberman Party Edition.iso"
+DEFAULT_SRC_DIR = (
+    "/mnt/crucial4tb/Emulation/roms/ps/Bomberman - Party Edition (USA)"
+)
+DEFAULT_SRC_BIN = os.path.join(
+    DEFAULT_SRC_DIR, "Bomberman - Party Edition (USA).bin"
+)
 BIN_NAME = "Bomberman Party Edition.bin"
 CUE_NAME = "Bomberman Party Edition.cue"
 
-# Standard MODE2 Form1 sector: sync + header + subheader + user + EDC/ECC (zeros OK)
-_MODE2_SUBHEADER = bytes([0x00, 0x00, 0x08, 0x00, 0x00, 0x00, 0x08, 0x00])
-_EDC_ECC_ZEROS = bytes(280)  # 2352 - 12 - 4 - 8 - 2048
-
-
-def _bcd_to_int(b: int) -> int:
-    return ((b >> 4) * 10) + (b & 0x0F)
-
-
-def _int_to_bcd(v: int) -> int:
-    return ((v // 10) << 4) | (v % 10)
-
-
-def msf_to_lba(m: int, s: int, f: int) -> int:
-    return (_bcd_to_int(m) * 60 + _bcd_to_int(s)) * 75 + _bcd_to_int(f) - 150
-
-
-def lba_to_msf_bcd(lba: int) -> tuple[int, int, int]:
-    abs_frame = lba + 150
-    mm = abs_frame // (60 * 75)
-    ss = (abs_frame // 75) % 60
-    ff = abs_frame % 75
-    return _int_to_bcd(mm), _int_to_bcd(ss), _int_to_bcd(ff)
+# http://redump.org/disc/10806/
+REDUMP_SIZE = 660770880
+REDUMP_MD5 = "e0ceba6e448677f3d938b1dd176be3af"
+REDUMP_SHA1 = "53a509dbe859f773856f26d966f5edacbc701b4e"
 
 
 def file_hashes(path: str) -> tuple[str, str, int]:
@@ -69,90 +53,45 @@ def file_hashes(path: str) -> tuple[str, str, int]:
     return h_md5.hexdigest(), h_sha1.hexdigest(), size
 
 
-def map_syncs(src_path: str) -> dict[int, int]:
-    """Return {lba: file_offset_of_sync} for every CD sync in the dump."""
-    lba_map: dict[int, int] = {}
-    with open(src_path, "rb") as f:
-        data = f.read()
-    off = 0
-    while True:
-        j = data.find(SYNC, off)
-        if j < 0:
-            break
-        if j + 16 > len(data):
-            break
-        m, s, fr = data[j + 12], data[j + 13], data[j + 14]
-        lba = msf_to_lba(m, s, fr)
-        # First sync wins if duplicates appear.
-        if lba not in lba_map:
-            lba_map[lba] = j
-        off = j + 1
-    if not lba_map:
-        raise SystemExit("no CD sync marks found in source dump")
-    return lba_map
-
-
-def read_user(data: bytes, lba_map: dict[int, int], lba: int) -> bytes:
-    if lba not in lba_map:
+def read_user(data: bytes, lba: int) -> bytes:
+    off = lba * DST_SEC
+    if off + DST_SEC > len(data):
         raise KeyError(lba)
-    base = lba_map[lba]
-    return data[base + USER_OFF : base + USER_OFF + USER]
+    if data[off : off + 12] != SYNC:
+        raise SystemExit(f"bad sync at LBA {lba} (offset {off})")
+    return data[off + USER_OFF : off + USER_OFF + USER]
 
 
 def parse_root_entries(root: bytes) -> dict[str, tuple[int, int]]:
-    """Find files by ISO9660 name (tolerates mid-sector zero padding)."""
     entries: dict[str, tuple[int, int]] = {}
-    # Name-anchored scan: locate NAME;1 then back up to the dirent header.
     i = 0
     while i < len(root):
-        semi = root.find(b";1", i)
-        if semi < 0:
-            break
-        # Walk back over the filename characters.
-        name_end = semi
-        name_start = name_end
-        while name_start > 0 and root[name_start - 1] not in (0x00, 0x01) and root[name_start - 1] >= 0x20:
-            # stop at namelen byte — detected below
-            name_start -= 1
-            if name_end - name_start > 64:
+        reclen = root[i]
+        if reclen == 0:
+            i = ((i // USER) + 1) * USER
+            if i >= len(root):
                 break
-        # namelen is the byte immediately before the name.
-        # Try plausible name starts (ISO name is [A-Z0-9._]).
-        for ns in range(max(0, name_end - 32), name_end):
-            namelen = name_end + 2 - ns  # include ";1"
-            if namelen < 3 or namelen > 37:
-                continue
-            if ns == 0 or root[ns - 1] != namelen:
-                continue
-            off = ns - 33
-            if off < 0:
-                continue
-            reclen = root[off]
-            if reclen < 34 or off + reclen > len(root):
-                continue
-            if root[off + 32] != namelen:
-                continue
-            name = root[ns:name_end].decode("ascii", "replace")
-            if not name or name in ("\x00", "\x01"):
-                continue
-            extent = struct.unpack_from("<I", root, off + 2)[0]
-            size = struct.unpack_from("<I", root, off + 10)[0]
-            if extent == 0 and size == 0:
-                continue
-            entries[name] = (extent, size)
+            continue
+        if i + reclen > len(root):
             break
-        i = semi + 2
+        extent = struct.unpack_from("<I", root, i + 2)[0]
+        size = struct.unpack_from("<I", root, i + 10)[0]
+        namelen = root[i + 32]
+        name = root[i + 33 : i + 33 + namelen]
+        if b";" in name:
+            name = name.split(b";")[0]
+        if name not in (b"\x00", b"\x01"):
+            entries[name.decode("ascii", "replace")] = (extent, size)
+        i += reclen
     return entries
 
 
-def extract_file(
-    data: bytes, lba_map: dict[int, int], extent: int, size: int
-) -> bytes:
+def extract_file(data: bytes, extent: int, size: int) -> bytes:
     out = bytearray()
     rem = size
     lba = extent
     while rem > 0:
-        sector = read_user(data, lba_map, lba)
+        sector = read_user(data, lba)
         take = min(USER, rem)
         out += sector[:take]
         rem -= take
@@ -160,105 +99,13 @@ def extract_file(
     return bytes(out)
 
 
-def build_mode2_sector(lba: int, user: bytes) -> bytes:
-    if len(user) != USER:
-        user = user.ljust(USER, b"\x00")[:USER]
-    mm, ss, ff = lba_to_msf_bcd(lba)
-    header = bytes([mm, ss, ff, 0x02])  # MODE2
-    return SYNC + header + _MODE2_SUBHEADER + user + _EDC_ECC_ZEROS
-
-
-def write_bin(
-    data: bytes, lba_map: dict[int, int], bin_path: str
-) -> tuple[int, int]:
-    max_lba = max(l for l in lba_map if l >= 0)
-    n = max_lba + 1
-    missing = 0
-    with open(bin_path, "wb") as out:
-        for lba in range(n):
-            if lba in lba_map:
-                user = read_user(data, lba_map, lba)
-            else:
-                user = bytes(USER)
-                missing += 1
-            out.write(build_mode2_sector(lba, user))
-    return n, missing
-
-
-def pack_root_directory(
-    bin_path: str, root_extent: int, entries: dict[str, tuple[int, int]]
-) -> None:
-    """Rewrite the ISO9660 root as contiguous MODE2/2352 user payloads.
-
-    The irregular source dump inserts zero runs inside the root sector. BIOS
-    directory walkers treat a zero record length as end-of-directory, so files
-    after the hole (including ``SLUS_011.89``) are invisible until we pack.
-    """
-    with open(bin_path, "r+b") as f:
-        def read_user(lba: int) -> bytes:
-            f.seek(lba * DST_SEC + 24)
-            return f.read(USER)
-
-        def write_user(lba: int, user: bytes) -> None:
-            if len(user) != USER:
-                user = user.ljust(USER, b"\x00")[:USER]
-            f.seek(lba * DST_SEC + 24)
-            f.write(user)
-
-        orig = read_user(root_extent)
-        if not orig or orig[0] < 34:
-            raise SystemExit("root directory sector unreadable for pack")
-        dot = orig[0 : orig[0]]
-        ddot = orig[orig[0] : orig[0] + orig[orig[0]]]
-
-        # Rebuild minimal dirents from the name→(extent,size) map already parsed
-        # from the quirky source (plus . / ..).
-        packed = bytearray()
-        packed += dot
-        packed += ddot
-        for name in sorted(entries):
-            extent, size = entries[name]
-            name_bytes = (name + ";1").encode("ascii")
-            namelen = len(name_bytes)
-            reclen = 33 + namelen
-            if reclen % 2:
-                reclen += 1
-            if (len(packed) % USER) + reclen > USER:
-                packed += b"\x00" * (USER - (len(packed) % USER))
-            rec = bytearray(reclen)
-            rec[0] = reclen
-            struct.pack_into("<I", rec, 2, extent)
-            struct.pack_into(">I", rec, 6, extent)
-            struct.pack_into("<I", rec, 10, size)
-            struct.pack_into(">I", rec, 14, size)
-            rec[25] = 0  # file
-            rec[32] = namelen
-            rec[33 : 33 + namelen] = name_bytes
-            packed += rec
-        while len(packed) % USER:
-            packed += b"\x00"
-        nsec = len(packed) // USER
-        for i in range(nsec):
-            write_user(root_extent + i, bytes(packed[i * USER : (i + 1) * USER]))
-
-        # Keep PVD root size in sync (both endian fields).
-        pvd = bytearray(read_user(16))
-        struct.pack_into("<I", pvd, 166, len(packed))
-        struct.pack_into(">I", pvd, 170, len(packed))
-        write_user(16, bytes(pvd))
-        print(
-            f"  packed root directory at LBA {root_extent} "
-            f"({len(entries)} files, {len(packed)} bytes)"
-        )
-
-
 def write_cue(out_dir: str) -> None:
-    cue_path = os.path.join(out_dir, CUE_NAME)
-    with open(cue_path, "w", encoding="utf-8") as c:
-        c.write(f'FILE "{BIN_NAME}" BINARY\n')
-        c.write("  TRACK 01 MODE2/2352\n")
-        c.write("    INDEX 01 00:00:00\n")
-    print(f"wrote {cue_path}")
+    path = os.path.join(out_dir, CUE_NAME)
+    with open(path, "w", encoding="ascii", newline="\n") as f:
+        f.write(f'FILE "{BIN_NAME}" BINARY\n')
+        f.write("  TRACK 01 MODE2/2352\n")
+        f.write("    INDEX 01 00:00:00\n")
+    print(f"wrote {path}")
 
 
 def main() -> int:
@@ -267,13 +114,18 @@ def main() -> int:
     ap.add_argument(
         "source",
         nargs="?",
-        default=DEFAULT_SRC,
-        help="path to the irregular source dump",
+        default=DEFAULT_SRC_BIN,
+        help="path to Redump MODE2/2352 .bin (default: USA Redump path)",
     )
     ap.add_argument(
         "--out-dir",
         default=os.path.join(repo_root, "bpe"),
         help="output directory for bin/cue/EXE (default: <repo>/bpe)",
+    )
+    ap.add_argument(
+        "--skip-hash-check",
+        action="store_true",
+        help="do not require Redump size/MD5/SHA-1",
     )
     args = ap.parse_args()
 
@@ -289,25 +141,37 @@ def main() -> int:
     print(f"  md5   {src_md5}")
     print(f"  sha1  {src_sha1}")
 
-    print("mapping sync → LBA …")
+    if not args.skip_hash_check:
+        if (
+            src_size != REDUMP_SIZE
+            or src_md5 != REDUMP_MD5
+            or src_sha1 != REDUMP_SHA1
+        ):
+            print(
+                "source does not match Redump SLUS-01189 "
+                f"(expected size={REDUMP_SIZE} md5={REDUMP_MD5} sha1={REDUMP_SHA1})",
+                file=sys.stderr,
+            )
+            print("pass --skip-hash-check to force (not recommended)", file=sys.stderr)
+            return 1
+        print("  Redump hashes OK")
+
+    if src_size % DST_SEC != 0:
+        print(f"source size {src_size} is not a multiple of {DST_SEC}", file=sys.stderr)
+        return 1
+
     with open(args.source, "rb") as f:
         data = f.read()
-    lba_map = map_syncs(args.source)
-    data_lbas = [l for l in lba_map if l >= 0]
-    print(
-        f"  mapped {len(lba_map)} syncs "
-        f"(data LBA {min(data_lbas)}..{max(data_lbas)})"
-    )
 
-    pvd = read_user(data, lba_map, 16)
+    pvd = read_user(data, 16)
     if pvd[1:6] != b"CD001":
         raise SystemExit("PVD not found at LBA 16 (expected CD001 at user+1)")
     root_extent = struct.unpack_from("<I", pvd, 158)[0]
     root_size = struct.unpack_from("<I", pvd, 166)[0]
     root = bytearray()
     for i in range((root_size + USER - 1) // USER):
-        root += read_user(data, lba_map, root_extent + i)
-    root = bytes(root[:root_size]) if root_size <= len(root) else bytes(root)
+        root += read_user(data, root_extent + i)
+    root = bytes(root[:root_size])
 
     entries = parse_root_entries(root)
     print(f"  root entries: {sorted(entries)}")
@@ -317,26 +181,27 @@ def main() -> int:
 
     for name in ("SYSTEM.CNF", "SLUS_011.89"):
         extent, size = entries[name]
-        blob = extract_file(data, lba_map, extent, size)
+        blob = extract_file(data, extent, size)
+        if name == "SLUS_011.89":
+            if blob[:8] != b"PS-X EXE":
+                raise SystemExit("SLUS_011.89 is not a PS-X EXE")
+            pc0 = struct.unpack_from("<I", blob, 0x10)[0]
+            print(f"  SLUS_011.89 PC0={pc0:#010x} ({len(blob)} bytes, LBA {extent})")
         out_path = os.path.join(args.out_dir, name)
         with open(out_path, "wb") as out:
             out.write(blob)
         print(f"wrote {out_path} ({len(blob)} bytes, LBA {extent})")
-        if name == "SLUS_011.89" and blob[:8] != b"PS-X EXE":
-            raise SystemExit("SLUS_011.89 is not a PS-X EXE")
 
     bin_path = os.path.join(args.out_dir, BIN_NAME)
-    print(f"writing {bin_path} …")
-    n_sec, missing = write_bin(data, lba_map, bin_path)
-    print(f"  {n_sec} sectors ({n_sec * DST_SEC} bytes), {missing} gap sectors zero-filled")
-    # Source root dirents are split by mid-sector zero padding; a real BIOS
-    # ISO9660 walker stops at the first zero and never sees SLUS_011.89.
-    # Repack the root so HLE boot-skip / LLE shell can LoadExe from disc.
-    pack_root_directory(bin_path, root_extent, entries)
+    if os.path.abspath(args.source) != os.path.abspath(bin_path):
+        print(f"copying {args.source} → {bin_path}")
+        shutil.copy2(args.source, bin_path)
+    else:
+        print(f"source already at {bin_path}")
     write_cue(args.out_dir)
 
     bin_md5, bin_sha1, bin_size = file_hashes(bin_path)
-    print(f"working bin:")
+    print("working bin:")
     print(f"  size  {bin_size}")
     print(f"  md5   {bin_md5}")
     print(f"  sha1  {bin_sha1}")

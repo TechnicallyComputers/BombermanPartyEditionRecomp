@@ -75,14 +75,17 @@ That bakes `PSX_MAX_PLAYERS=5`. `game.toml` keeps `players = 5` for lobby
 `max_slots` and launcher controller cards. Games that omit `MAX_PLAYERS`
 stay at the framework default of **2** (MotK).
 
-Multitap (SCPH-1070 on port 1 + pad on port 2) is enabled when a netplay
-session uses 3+ slots.
+Multitap (SCPH-1070) arms offline when `players >= 3` after game entry, and
+for netplay when `slot_count >= 3`. Default tap is console Port 1; set
+`[controller] multitap_port = 2` for titles that need the tap on Port 2
+(Bomberman Party Edition). Bulk polls follow the real TAP/REQ latch.
 
 ## Framework pin
 
 Nested `psxrecomp` tracks `feat/max-players-5` (local tip includes multitap +
-`MAX_PLAYERS`). Nested `lib/recomp-net` / `lib/recomp-ui` track the 5-slot
-feature tips. Lobby server counterpart: `recomp-net-server` `feat/max-slots-5`.
+`MAX_PLAYERS`) and keeps **`lib/recomp-net` only**. The Dear ImGui launcher is
+the repo-root **`recomp-ui`** submodule. Lobby server counterpart:
+`recomp-net-server` `feat/max-slots-5`.
 
 ## Status
 

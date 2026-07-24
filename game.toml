@@ -19,7 +19,7 @@ debug_port = 4530
 window_title = "Bomberman Party Edition Recompiled"
 memcard_dir = "saves"
 disc_speed = "4x"
-bios_hle = true
+bios_hle = false
 bios_hle_keep_intro = false
 fast_boot = false
 overlay_cache = true
@@ -35,3 +35,9 @@ aspect_ratio = "4:3"
 [controller]
 default_mode = "digital"
 allow_hybrid = false
+# Default stick deadzone ~10% (raw SDL units). Per-player overrides live in
+# settings.toml as pN_deadzone.
+deadzone = 3277
+# Bomberman Party Edition needs the SCPH-1070 on console Port 2 (P1 stays a
+# normal pad on Port 1). Empty tap slots are fine — one controller is enough.
+multitap_port = 2
