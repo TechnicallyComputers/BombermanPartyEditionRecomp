@@ -20,7 +20,10 @@
 | MotK / default | omit `MAX_PLAYERS` → 2 |
 
 Hardware map when multitap is on (`slot_count >= 3` or offline after game
-start with `players >= 3`): port1 SCPH-1070 pads A–D = P1–P4, port2 = P5.
+start with `players >= 3`), with `[controller] multitap_port = 2` (BPE):
+port1 = P1 (normal pad), port2 SCPH-1070 pads A–D = P2–P5. Default
+`multitap_port = 1` is the inverse (tap on port1 = P1–P4, port2 = P5).
+TAP/REQ latch: bulk `0x80` only after a prior `REQ=1`; empty tap slots OK.
 
 ## Open
 

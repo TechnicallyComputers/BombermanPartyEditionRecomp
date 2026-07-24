@@ -4,6 +4,43 @@ project(BombermanPartyEditionRecomp C CXX)
 set(CMAKE_C_STANDARD 99)
 set(CMAKE_CXX_STANDARD 17)
 
+# Profile-guided optimization for intro + OPENING.STR FMV host path.
+#   cmake -DPSX_PGO=generate ... && ninja && run intro (~2–3 min)
+#   cmake -DPSX_PGO=use ... && ninja
+# Profiles land in ${CMAKE_BINARY_DIR}/pgo/ (see scripts/pgo_bpe_intro.sh).
+set(PSX_PGO "" CACHE STRING "PGO mode: empty | generate | use")
+set(PSX_PGO_DIR "${CMAKE_BINARY_DIR}/pgo" CACHE PATH "PGO profile directory")
+if(PSX_PGO STREQUAL "generate")
+    file(MAKE_DIRECTORY "${PSX_PGO_DIR}")
+    if(CMAKE_C_COMPILER_ID MATCHES "Clang")
+        add_compile_options(-fprofile-instr-generate)
+        add_link_options(-fprofile-instr-generate)
+    else()
+        add_compile_options(-fprofile-generate=${PSX_PGO_DIR})
+        add_link_options(-fprofile-generate=${PSX_PGO_DIR})
+    endif()
+elseif(PSX_PGO STREQUAL "use")
+    if(CMAKE_C_COMPILER_ID MATCHES "Clang")
+        set(_psx_pgo_profdata "${PSX_PGO_DIR}/default.profdata")
+        if(NOT EXISTS "${_psx_pgo_profdata}")
+            message(FATAL_ERROR
+                "PSX_PGO=use (Clang): missing ${_psx_pgo_profdata}. "
+                "Train with LLVM_PROFILE_FILE=.../pgo/bpe-%p.profraw then "
+                "llvm-profdata merge -o default.profdata *.profraw")
+        endif()
+        add_compile_options("-fprofile-instr-use=${_psx_pgo_profdata}")
+        add_link_options("-fprofile-instr-use=${_psx_pgo_profdata}")
+    else()
+        add_compile_options(
+            -fprofile-use=${PSX_PGO_DIR}
+            -fprofile-correction
+            -Wno-coverage-mismatch
+            -Wno-missing-profile
+        )
+        add_link_options(-fprofile-use=${PSX_PGO_DIR})
+    endif()
+endif()
+
 # Release version pin for netplay lobby matching (baked as PSX_GAME_VERSION).
 file(READ "${CMAKE_CURRENT_SOURCE_DIR}/VERSION" _BPE_VER_RAW)
 string(STRIP "${_BPE_VER_RAW}" BPE_RELEASE_VERSION)

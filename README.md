@@ -75,8 +75,10 @@ That bakes `PSX_MAX_PLAYERS=5`. `game.toml` keeps `players = 5` for lobby
 `max_slots` and launcher controller cards. Games that omit `MAX_PLAYERS`
 stay at the framework default of **2** (MotK).
 
-Multitap (SCPH-1070 on port 1 + pad on port 2) is enabled when a netplay
-session uses 3+ slots.
+Multitap (SCPH-1070) arms offline when `players >= 3` after game entry, and
+for netplay when `slot_count >= 3`. Default tap is console Port 1; set
+`[controller] multitap_port = 2` for titles that need the tap on Port 2
+(Bomberman Party Edition). Bulk polls follow the real TAP/REQ latch.
 
 ## Framework pin
 
