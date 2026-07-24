@@ -54,6 +54,19 @@ cmake --build build-release --target psx-runtime -j"$(nproc)"
 
 For debugging (port **4530**), use `-DCMAKE_BUILD_TYPE=RelWithDebInfo`.
 
+### Linux netplay release (ICE)
+
+One-shot configure + Release build with MotK online ICE, then zip (no BIOS/disc):
+
+```bash
+bash scripts/build_linux_netplay.sh
+# → build-linux-netplay/Bomberman_Party_Edition_Recompiled
+# → dist/bpe-<VERSION>-linux-netplay.zip
+```
+
+Build only: `bash scripts/build_linux_netplay.sh --no-package`  
+Repack an existing build: `bash scripts/package_release.sh build-linux-netplay linux-netplay`
+
 Clone with submodules:
 
 ```bash
