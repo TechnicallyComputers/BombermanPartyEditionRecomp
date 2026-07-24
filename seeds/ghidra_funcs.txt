@@ -1,6 +1,5 @@
 # Function-start seeds for Bomberman Party Edition (SLUS-01189).
 # Prologue scan + JAL targets from SLUS_011.89 text; entry required.
-0x80012ED8
 0x80012F38
 0x80013058
 0x800130E8
@@ -1648,3 +1647,9 @@
 0x80082634
 0x80082A38
 0x80082A58
+0x80078638
+
+# Planted trampolines / thunks (reachable discovery)
+0x80057e00
+0x800787b8
+0x80057fd0
