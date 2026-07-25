@@ -67,6 +67,24 @@ bash scripts/build_linux_netplay.sh
 Build only: `bash scripts/build_linux_netplay.sh --no-package`  
 Repack an existing build: `bash scripts/package_release.sh build-linux-netplay linux-netplay`
 
+### Windows MinGW release from Linux (ICE)
+
+Cross-compile with MinGW-w64, statically link SDL2 + libgcc when possible, zip
+with launcher assets and any remaining DLLs:
+
+```bash
+# Arch / CachyOS:
+#   pacman -S --needed mingw-w64-gcc mingw-w64-sdl2 cmake ninja zip
+
+bash scripts/build_windows_mingw.sh
+# → build-mingw-netplay/Bomberman_Party_Edition_Recompiled.exe
+# → dist/bpe-<VERSION>-windows-x64-mingw.zip
+```
+
+Build only: `bash scripts/build_windows_mingw.sh --no-package`  
+Dynamic SDL2/libgcc (bundle DLLs): `bash scripts/build_windows_mingw.sh --dynamic`  
+Repack: `bash scripts/package_release.sh build-mingw-netplay windows-x64-mingw`
+
 Clone with submodules:
 
 ```bash
