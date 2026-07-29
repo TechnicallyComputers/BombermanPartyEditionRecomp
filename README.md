@@ -1,7 +1,7 @@
 # BombermanPartyEditionRecomp
 
 *Bomberman Party Edition* (USA, **SLUS-01189**) — game project for
-[PSXRecomp](https://github.com/TechnicallyComputers/psxrecomp).
+[PSXRecomp](https://github.com/mstan/psxrecomp).
 
 Holds game config, seeds, build glue, and (for private CI) recompiler
 `generated/` output. Disc images and BIOS stay local and gitignored.
@@ -13,7 +13,7 @@ Holds game config, seeds, build glue, and (for private CI) recompiler
 | `game.toml` | Game / recompiler / runtime config |
 | `seeds/` | Function-start seeds for `psxrecomp-game` |
 | `bpe/` | Local disc `.bin`/`.cue`, `SLUS_011.89`, `SYSTEM.CNF` (gitignored) |
-| `psxrecomp/` | Framework submodule (`TechnicallyComputers/psxrecomp`) |
+| `psxrecomp/` | Framework submodule (`mstan/psxrecomp`) |
 | `generated/` | Recompiler output (tracked for CI; regenerate when seeds change) |
 | `VERSION` | Release / lobby match pin (e.g. `0.1.0`) |
 | `DISC.md` | Disc identity + hashes |
@@ -147,10 +147,16 @@ for netplay when `slot_count >= 3`. Default tap is console Port 1; set
 
 ## Framework pin
 
-Nested `psxrecomp` tracks `feat/max-players-5` (local tip includes multitap +
-`MAX_PLAYERS`) and keeps **`lib/recomp-net` only**. The Dear ImGui launcher is
-the repo-root **`recomp-ui`** submodule. Lobby server counterpart:
-`recomp-net-server` `feat/max-slots-5`.
+Both framework submodules track **`mstan` `master`**:
+
+| Submodule | Repo | Branch |
+|-----------|------|--------|
+| `psxrecomp/` | [mstan/psxrecomp](https://github.com/mstan/psxrecomp) | `master` |
+| `recomp-ui/` | [mstan/recomp-ui](https://github.com/mstan/recomp-ui) | `master` |
+
+`psxrecomp` vendors **`lib/recomp-net`** only (nested gitlink). The Dear ImGui
+launcher is the repo-root **`recomp-ui`** submodule. Lobby server counterpart:
+`recomp-net-server`.
 
 ## Status
 
