@@ -170,11 +170,16 @@ jobs:
 
       # Current psxrecomp requires <stem>_psx_bios_backend in generated dispatch.
       # The SCPH1001.zip in ci-assets is pre-descriptor; regenerate on the runner.
+      # Use matrix shell (msys2 on Windows) — Git Bash cannot load MinGW DLLs for
+      # psxrecomp-bios.exe (exit 127 right after "emit-full").
       - name: Regenerate BIOS C (OpenBIOS + SCPH1001)
-        shell: bash
         run: |
           set -euo pipefail
           JOBS="$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)"
+          # MinGW runtime DLLs for the just-built psxrecomp-bios[.exe]
+          if [[ -d /mingw64/bin ]]; then
+            export PATH="/mingw64/bin:${PATH}"
+          fi
 
           BIOS_SRC=''
           for cand in \
@@ -200,6 +205,13 @@ jobs:
           cmake -S psxrecomp/recompiler -B build-recompiler -G Ninja \
             -DCMAKE_BUILD_TYPE=Release
           cmake --build build-recompiler --target psxrecomp-bios -j"${JOBS}"
+
+          # MSYS sees PE files without +x; chmod so bash can exec them.
+          if [[ -f build-recompiler/psxrecomp-bios.exe ]]; then
+            chmod +x build-recompiler/psxrecomp-bios.exe
+          elif [[ -f build-recompiler/psxrecomp-bios ]]; then
+            chmod +x build-recompiler/psxrecomp-bios
+          fi
 
           (
             cd psxrecomp
