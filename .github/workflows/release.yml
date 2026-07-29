@@ -210,14 +210,21 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
+          # libsdl2-dev: still useful for headers/tooling; runtime defaults to
+          # SDL3 via FetchContent. libxtst-dev is required when building the
+          # fetched SDL3 (SDL_X11_XTEST); libsdl2-dev does not pull it in.
           sudo apt-get install -y --no-install-recommends \
             build-essential cmake ninja-build pkg-config \
-            libsdl2-dev libgl1-mesa-dev zip
+            libsdl2-dev libgl1-mesa-dev libxtst-dev \
+            libx11-dev libxext-dev libxrandr-dev libxcursor-dev \
+            libxfixes-dev libxi-dev libxss-dev libxkbcommon-dev \
+            libasound2-dev libpulse-dev libudev-dev zip
 
       - name: Install deps (macOS)
         if: runner.os == 'macOS'
         run: |
-          brew install cmake ninja pkg-config sdl2
+          # Prefer system SDL3 when available; FetchContent covers older brew.
+          brew install cmake ninja pkg-config sdl3 || brew install cmake ninja pkg-config sdl2
           # zip is preinstalled; llvm-profdata via xcrun / Xcode CLT
 
       - name: Configure & build (no PGO)
