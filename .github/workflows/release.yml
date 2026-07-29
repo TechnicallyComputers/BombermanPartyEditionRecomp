@@ -5,9 +5,12 @@
 #   - generated/ (recompiled game C) committed in this repo for CI.
 #   - Secret CI_ASSETS_TOKEN: fine-grained PAT with Contents:Read on
 #     TechnicallyComputers/psxrecomp-ci-assets (private). That repo supplies:
-#       - SCPH1001.zip (or loose SCPH1001_{full,dispatch}.c) for link-time BIOS C
-#       - SCPH1001.BIN + bpe/*.cue|*.bin (Git LFS) for per-OS intro PGO train
-#     Players still pick BIOS + disc at first launch; neither is in the zip.
+#       - SCPH1001.BIN + bpe/*.cue|*.bin (Git LFS) for BIOS regen + intro PGO
+#     Link-time BIOS C is regenerated on the runner (OpenBIOS from the bundled
+#     MIT image; SCPH1001 from the LFS dump) so it matches the current emitter
+#     backend-descriptor ABI. The old SCPH1001.zip pre-dates that ABI and is
+#     ignored. Players still pick BIOS + disc at first launch; neither is in
+#     the zip.
 #
 # Framework deps use this repository's exact gitlink pins:
 #   - psxrecomp at the game root (which owns its recomp-net pin)
@@ -114,61 +117,7 @@ jobs:
           fetch-depth: 1
           lfs: true
 
-      - name: Install BIOS generated into psxrecomp/generated
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p psxrecomp/generated
-          if command -v python3 >/dev/null 2>&1; then PY=python3; else PY=python; fi
-          "$PY" - <<'PY'
-          import shutil
-          import zipfile
-          from pathlib import Path
-
-          dest = Path("psxrecomp/generated")
-          assets = Path("_ci-assets")
-          dest.mkdir(parents=True, exist_ok=True)
-
-          for name in (
-              "SCPH1001_full.c",
-              "SCPH1001_dispatch.c",
-              "SCPH1001.emitter.sha",
-          ):
-              src = assets / name
-              if src.is_file():
-                  shutil.copy2(src, dest / name)
-
-          for zpath in sorted(assets.rglob("*.zip")):
-              staging = dest / "_unzip"
-              if staging.exists():
-                  shutil.rmtree(staging)
-              staging.mkdir(parents=True)
-              with zipfile.ZipFile(zpath) as zf:
-                  zf.extractall(staging)
-              for p in staging.rglob("SCPH1001_*"):
-                  if p.is_file():
-                      shutil.copy2(p, dest / p.name)
-              for p in staging.rglob("SCPH1001.emitter.sha"):
-                  if p.is_file():
-                      shutil.copy2(p, dest / p.name)
-              shutil.rmtree(staging)
-
-          missing = [
-              n
-              for n in ("SCPH1001_full.c", "SCPH1001_dispatch.c")
-              if not (dest / n).is_file()
-          ]
-          if missing:
-              listing = sorted(p.name for p in assets.iterdir()) if assets.is_dir() else []
-              raise SystemExit(
-                  f"missing {missing} under psxrecomp/generated after install; "
-                  f"_ci-assets has: {listing}"
-              )
-          full = dest / "SCPH1001_full.c"
-          print(f"BIOS generated OK ({full.stat().st_size} bytes)")
-          PY
-
-      - name: Require generated game + BIOS C
+      - name: Require generated game C
         shell: bash
         run: |
           set -euo pipefail
@@ -183,14 +132,6 @@ jobs:
             exit 1
           fi
           echo "generated/ OK ($(ls generated/SLUS_011.89_full_*.c 2>/dev/null | wc -l) shards)"
-          for f in psxrecomp/generated/SCPH1001_full.c \
-                   psxrecomp/generated/SCPH1001_dispatch.c; do
-            if [[ ! -f "$f" ]]; then
-              echo "::error::missing $f — check CI_ASSETS_TOKEN and psxrecomp-ci-assets"
-              exit 1
-            fi
-          done
-          echo "BIOS generated/ OK"
 
       - name: Setup MSYS2 (Windows)
         if: runner.os == 'Windows'
@@ -226,6 +167,62 @@ jobs:
           # Prefer system SDL3 when available; FetchContent covers older brew.
           brew install cmake ninja pkg-config sdl3 || brew install cmake ninja pkg-config sdl2
           # zip is preinstalled; llvm-profdata via xcrun / Xcode CLT
+
+      # Current psxrecomp requires <stem>_psx_bios_backend in generated dispatch.
+      # The SCPH1001.zip in ci-assets is pre-descriptor; regenerate on the runner.
+      - name: Regenerate BIOS C (OpenBIOS + SCPH1001)
+        shell: bash
+        run: |
+          set -euo pipefail
+          JOBS="$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)"
+
+          BIOS_SRC=''
+          for cand in \
+              '_ci-assets/SCPH1001.BIN' \
+              '_ci-assets/SCPH1001.bin' \
+              '_ci-assets/bios/SCPH1001.BIN' \
+              '_ci-assets/bios/SCPH1001.bin'; do
+            if [[ -f "$cand" ]]; then BIOS_SRC="$cand"; break; fi
+          done
+          if [[ -z "${BIOS_SRC}" ]]; then
+            echo "::error::SCPH1001.BIN missing under _ci-assets (need dump for retail BIOS regen)"
+            find _ci-assets -maxdepth 2 -type f | head -40
+            exit 1
+          fi
+          BIOS_SZ="$(wc -c < "${BIOS_SRC}" | tr -d '[:space:]')"
+          if [[ "${BIOS_SZ}" -lt 500000 || "${BIOS_SZ}" -gt 600000 ]]; then
+            echo "::error::BIOS size ${BIOS_SZ} looks wrong (want ~512 KiB)"
+            exit 1
+          fi
+          mkdir -p psxrecomp/bios
+          cp -f "${BIOS_SRC}" psxrecomp/bios/SCPH1001.BIN
+
+          cmake -S psxrecomp/recompiler -B build-recompiler -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-recompiler --target psxrecomp-bios -j"${JOBS}"
+
+          (
+            cd psxrecomp
+            export PSXRECOMP_BIOS_BUILD="${PWD}/../build-recompiler"
+            bash tools/regen_bios.sh --config bios/OpenBIOS.toml
+            bash tools/regen_bios.sh --config bios/SCPH1001.toml
+          )
+
+          for stem in OpenBIOS SCPH1001; do
+            for f in "psxrecomp/generated/${stem}_full.c" \
+                     "psxrecomp/generated/${stem}_dispatch.c"; do
+              if [[ ! -f "$f" ]]; then
+                echo "::error::missing $f after regen_bios"
+                exit 1
+              fi
+            done
+            if ! grep -q "${stem}_psx_bios_backend" \
+                "psxrecomp/generated/${stem}_dispatch.c"; then
+              echo "::error::${stem}_dispatch.c lacks ${stem}_psx_bios_backend descriptor"
+              exit 1
+            fi
+            echo "BIOS ${stem}: OK ($(wc -c < "psxrecomp/generated/${stem}_full.c") bytes)"
+          done
 
       - name: Configure & build (no PGO)
         if: ${{ !matrix.pgo }}
