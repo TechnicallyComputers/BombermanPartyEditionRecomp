@@ -85,6 +85,40 @@ Build only: `bash scripts/build_windows_mingw.sh --no-package`
 Dynamic SDL2/libgcc (bundle DLLs): `bash scripts/build_windows_mingw.sh --dynamic`  
 Repack: `bash scripts/package_release.sh build-mingw-netplay windows-x64-mingw`
 
+### PGO (intro + OPENING.STR)
+
+Profile-guided optimization trains the compiler on logos through the opening
+FMV. One-shot (windowed; prefer a real display so present/audio paths count):
+
+```bash
+DISPLAY=:0 ./scripts/pgo_bpe_intro.sh
+```
+
+Optional: `PGO_TRAIN_RUNS=3` `PGO_TRAIN_SECS=120`. After large runtime edits,
+retrain so profiles stay fresh (`-DPSX_PGO=use` with stale `.gcda` underperforms).
+
+## CI / release packages
+
+GitHub Actions workflow: `.github/workflows/release.yml`
+
+| Artifact | Runner |
+|----------|--------|
+| `linux-x64` | `ubuntu-24.04` |
+| `windows-x64` | `windows-2022` (MSYS2 MinGW64) |
+| `macos-arm64` | `macos-15` |
+| `macos-x64` | `macos-15-intel` (older Intel Macs) |
+
+- Manual: **Actions → Release builds → Run workflow**
+- Tag `v0.1.0` (matching `VERSION`): builds + GitHub Release with zips
+- Packages include the exe, `assets/` (recomp-ui fonts/img), `game.toml`, and
+  `VERSION` — never BIOS/disc
+- CI builds the exact committed **psxrecomp**, game-root **recomp-ui**, and
+  nested **recomp-net** gitlink pins
+- CI configures `-DRNET_ENABLE_ICE=ON`. Every matrix OS runs intro PGO train
+  on that runner (needs LFS disc + `SCPH1001.BIN` in `psxrecomp-ci-assets`
+  under `bpe/`; GCC `.gcda` on Linux/Windows, Clang profdata on macOS)
+- Local pack: `scripts/package_release.sh build-release linux-x64`
+
 Clone with submodules:
 
 ```bash

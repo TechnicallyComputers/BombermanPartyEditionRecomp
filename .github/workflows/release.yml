@@ -1,0 +1,430 @@
+# Build BPE Release packages for Linux, Windows, macOS (arm64 + Intel).
+# Does not ship BIOS or disc images in the player zip.
+#
+# Requires:
+#   - generated/ (recompiled game C) committed in this repo for CI.
+#   - Secret CI_ASSETS_TOKEN: fine-grained PAT with Contents:Read on
+#     TechnicallyComputers/psxrecomp-ci-assets (private). That repo supplies:
+#       - SCPH1001.zip (or loose SCPH1001_{full,dispatch}.c) for link-time BIOS C
+#       - SCPH1001.BIN + bpe/*.cue|*.bin (Git LFS) for per-OS intro PGO train
+#     Players still pick BIOS + disc at first launch; neither is in the zip.
+#
+# Framework deps use this repository's exact gitlink pins:
+#   - psxrecomp at the game root (which owns its recomp-net pin)
+#   - recomp-ui at the game root
+#
+# All matrix packages are PGO-trained on the BPE intro + OPENING.STR
+# (instrument → train → use) on that runner's toolchain (GCC .gcda on
+# Linux/Windows; Clang .profraw→profdata on macOS). Profiles are not
+# portable across OS/arch.
+#
+# Triggers:
+#   - workflow_dispatch (manual)
+#   - push tags matching v* (publishes a GitHub Release)
+
+name: Release builds
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+concurrency:
+  group: bpe-release-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+env:
+  CMAKE_BUILD_TYPE: Release
+
+jobs:
+  build:
+    name: ${{ matrix.artifact }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            artifact: linux-x64
+            shell: bash
+            pgo: true
+          - os: windows-2022
+            artifact: windows-x64
+            shell: 'msys2 {0}'
+            pgo: true
+          - os: macos-15
+            artifact: macos-arm64
+            shell: bash
+            deployment_target: '11.0'
+            pgo: true
+          - os: macos-15-intel
+            artifact: macos-x64
+            shell: bash
+            deployment_target: '11.0'
+            pgo: true
+
+    defaults:
+      run:
+        shell: ${{ matrix.shell }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Record pinned framework revisions
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "psxrecomp=$(git -C psxrecomp rev-parse --short HEAD) ($(git -C psxrecomp rev-parse HEAD))"
+          echo "recomp-ui=$(git -C recomp-ui rev-parse --short HEAD)"
+          echo "recomp-net=$(git -C psxrecomp/lib/recomp-net rev-parse --short HEAD)"
+
+      # Windows runners ship Git LFS; install only where apt/brew is needed.
+      # Use bash (not MSYS2) so this runs before setup-msys2.
+      - name: Install git-lfs (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends git-lfs
+          git lfs install
+
+      - name: Install git-lfs (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          brew install git-lfs
+          git lfs install
+
+      - name: Fetch CI assets (private, LFS)
+        uses: actions/checkout@v4
+        with:
+          repository: TechnicallyComputers/psxrecomp-ci-assets
+          token: ${{ secrets.CI_ASSETS_TOKEN }}
+          path: _ci-assets
+          fetch-depth: 1
+          lfs: true
+
+      - name: Install BIOS generated into psxrecomp/generated
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p psxrecomp/generated
+          if command -v python3 >/dev/null 2>&1; then PY=python3; else PY=python; fi
+          "$PY" - <<'PY'
+          import shutil
+          import zipfile
+          from pathlib import Path
+
+          dest = Path("psxrecomp/generated")
+          assets = Path("_ci-assets")
+          dest.mkdir(parents=True, exist_ok=True)
+
+          for name in (
+              "SCPH1001_full.c",
+              "SCPH1001_dispatch.c",
+              "SCPH1001.emitter.sha",
+          ):
+              src = assets / name
+              if src.is_file():
+                  shutil.copy2(src, dest / name)
+
+          for zpath in sorted(assets.rglob("*.zip")):
+              staging = dest / "_unzip"
+              if staging.exists():
+                  shutil.rmtree(staging)
+              staging.mkdir(parents=True)
+              with zipfile.ZipFile(zpath) as zf:
+                  zf.extractall(staging)
+              for p in staging.rglob("SCPH1001_*"):
+                  if p.is_file():
+                      shutil.copy2(p, dest / p.name)
+              for p in staging.rglob("SCPH1001.emitter.sha"):
+                  if p.is_file():
+                      shutil.copy2(p, dest / p.name)
+              shutil.rmtree(staging)
+
+          missing = [
+              n
+              for n in ("SCPH1001_full.c", "SCPH1001_dispatch.c")
+              if not (dest / n).is_file()
+          ]
+          if missing:
+              listing = sorted(p.name for p in assets.iterdir()) if assets.is_dir() else []
+              raise SystemExit(
+                  f"missing {missing} under psxrecomp/generated after install; "
+                  f"_ci-assets has: {listing}"
+              )
+          full = dest / "SCPH1001_full.c"
+          print(f"BIOS generated OK ({full.stat().st_size} bytes)")
+          PY
+
+      - name: Require generated game + BIOS C
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! -f generated/SLUS_011.89_dispatch.c ]]; then
+            echo "::error::generated/ is missing. BPE CI expects committed recompiler output."
+            echo "Regenerate with psxrecomp-game --config game.toml and commit generated/."
+            exit 1
+          fi
+          if ! compgen -G 'generated/SLUS_011.89_full_*.c' >/dev/null && \
+             [[ ! -f generated/SLUS_011.89_full.c ]]; then
+            echo "::error::generated/ has no SLUS_011.89_full_*.c shards (or full.c)."
+            exit 1
+          fi
+          echo "generated/ OK ($(ls generated/SLUS_011.89_full_*.c 2>/dev/null | wc -l) shards)"
+          for f in psxrecomp/generated/SCPH1001_full.c \
+                   psxrecomp/generated/SCPH1001_dispatch.c; do
+            if [[ ! -f "$f" ]]; then
+              echo "::error::missing $f — check CI_ASSETS_TOKEN and psxrecomp-ci-assets"
+              exit 1
+            fi
+          done
+          echo "BIOS generated/ OK"
+
+      - name: Setup MSYS2 (Windows)
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            mingw-w64-x86_64-toolchain
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-ninja
+            mingw-w64-x86_64-SDL2
+            mingw-w64-x86_64-pkgconf
+            zip
+
+      - name: Install deps (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build pkg-config \
+            libsdl2-dev libgl1-mesa-dev zip
+
+      - name: Install deps (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install cmake ninja pkg-config sdl2
+          # zip is preinstalled; llvm-profdata via xcrun / Xcode CLT
+
+      - name: Configure & build (no PGO)
+        if: ${{ !matrix.pgo }}
+        env:
+          CMAKE_OSX_DEPLOYMENT_TARGET: ${{ matrix.deployment_target || '' }}
+        run: |
+          set -euo pipefail
+          VERSION="$(tr -d '[:space:]' < VERSION)"
+          EXTRA=()
+          if [[ -n "${CMAKE_OSX_DEPLOYMENT_TARGET:-}" ]]; then
+            EXTRA+=("-DCMAKE_OSX_DEPLOYMENT_TARGET=${CMAKE_OSX_DEPLOYMENT_TARGET}")
+          fi
+          JOBS="$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)"
+          cmake -S . -B build-ci -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DRNET_ENABLE_ICE=ON \
+            -DPSX_GAME_VERSION="${VERSION}" \
+            "${EXTRA[@]}"
+          cmake --build build-ci --target psx-runtime -j"${JOBS}"
+
+      - name: Configure, PGO train intro, rebuild
+        if: ${{ matrix.pgo }}
+        env:
+          # Opening FMV is longer than MotK crawl; keep CI under ~4 min train.
+          PGO_TRAIN_SECS: '100'
+          PGO_TRAIN_RUNS: '2'
+          CMAKE_OSX_DEPLOYMENT_TARGET: ${{ matrix.deployment_target || '' }}
+        run: |
+          set -euo pipefail
+          VERSION="$(tr -d '[:space:]' < VERSION)"
+          JOBS="$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)"
+          LOGDIR="${TMPDIR:-/tmp}"
+          mkdir -p "${LOGDIR}"
+          EXTRA=()
+          if [[ -n "${CMAKE_OSX_DEPLOYMENT_TARGET:-}" ]]; then
+            EXTRA+=("-DCMAKE_OSX_DEPLOYMENT_TARGET=${CMAKE_OSX_DEPLOYMENT_TARGET}")
+          fi
+
+          DISC_CUE='bpe/Bomberman Party Edition.cue'
+          DISC_BIN='bpe/Bomberman Party Edition.bin'
+          BIOS_SRC=''
+          for cand in \
+              '_ci-assets/SCPH1001.BIN' \
+              '_ci-assets/SCPH1001.bin' \
+              '_ci-assets/bios/SCPH1001.BIN' \
+              '_ci-assets/bios/SCPH1001.bin'; do
+            if [[ -f "$cand" ]]; then BIOS_SRC="$cand"; break; fi
+          done
+          if [[ -z "${BIOS_SRC}" ]]; then
+            echo "::error::SCPH1001.BIN missing under _ci-assets (need real BIOS for PGO train)"
+            find _ci-assets -maxdepth 2 -type f | head -40
+            exit 1
+          fi
+          if [[ ! -f "_ci-assets/${DISC_CUE}" || ! -f "_ci-assets/${DISC_BIN}" ]]; then
+            echo "::error::BPE cue/bin missing under _ci-assets/bpe (LFS pull?)"
+            ls -la _ci-assets/bpe || true
+            exit 1
+          fi
+          # Pointer files are ~130 bytes; real BIN is hundreds of MB.
+          BIN_SZ="$(wc -c < "_ci-assets/${DISC_BIN}" | tr -d '[:space:]')"
+          if [[ "${BIN_SZ}" -lt 100000000 ]]; then
+            echo "::error::disc .bin is only ${BIN_SZ} bytes — Git LFS did not materialize"
+            exit 1
+          fi
+          BIOS_SZ="$(wc -c < "${BIOS_SRC}" | tr -d '[:space:]')"
+          if [[ "${BIOS_SZ}" -lt 500000 || "${BIOS_SZ}" -gt 600000 ]]; then
+            echo "::error::BIOS size ${BIOS_SZ} looks wrong (want ~512 KiB)"
+            exit 1
+          fi
+
+          mkdir -p bios bpe
+          cp -f "${BIOS_SRC}" bios/SCPH1001.BIN
+          cp -f "_ci-assets/${DISC_CUE}" "${DISC_CUE}"
+          cp -f "_ci-assets/${DISC_BIN}" "${DISC_BIN}"
+          echo "PGO train assets: bios=${BIOS_SZ} disc_bin=${BIN_SZ} jobs=${JOBS}"
+
+          # 1) Instrumented build
+          cmake -S . -B build-ci -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DRNET_ENABLE_ICE=ON \
+            -DPSX_GAME_VERSION="${VERSION}" \
+            -DPSX_PGO=generate \
+            "${EXTRA[@]}"
+          cmake --build build-ci --target psx-runtime -j"${JOBS}"
+
+          EXE=./build-ci/Bomberman_Party_Edition_Recompiled
+          if [[ -f "${EXE}.exe" ]]; then EXE="${EXE}.exe"; fi
+          if [[ ! -f "${EXE}" ]]; then
+            echo "::error::missing train binary ${EXE}"
+            ls -la build-ci | head -40
+            exit 1
+          fi
+
+          # 2) Train on logos + OPENING.STR (headless; merge profiles across runs)
+          rm -rf build-ci/pgo
+          mkdir -p build-ci/pgo
+          export SDL_VIDEODRIVER=dummy
+          export PSX_HEADLESS=1
+          # Prefer LLE BIOS for train (game.toml defaults bios_hle=true).
+          export PSX_BIOS_HLE=0
+          # Clang/AppleClang instr-PGO; ignored by GCC gcov path.
+          export LLVM_PROFILE_FILE="${PWD}/build-ci/pgo/bpe-%p.profraw"
+          for run in $(seq 1 "${PGO_TRAIN_RUNS}"); do
+            echo "PGO train run ${run}/${PGO_TRAIN_RUNS} (${PGO_TRAIN_SECS}s)..."
+            "${EXE}" --no-launcher --headless \
+              --game game.toml \
+              --disc "${DISC_CUE}" \
+              --bios bios/SCPH1001.BIN \
+              >"${LOGDIR}/bpe_pgo_train_${run}.log" 2>&1 &
+            MPID=$!
+            sleep "${PGO_TRAIN_SECS}"
+            # Soft-stop: runtime maps SIGTERM/SIGINT → exit(0) so PGO
+            # writers flush. Bare kill without that leaves 0 profiles.
+            if kill -0 "${MPID}" 2>/dev/null; then
+              kill -TERM "${MPID}" 2>/dev/null || true
+              for _ in $(seq 1 30); do
+                kill -0 "${MPID}" 2>/dev/null || break
+                sleep 1
+              done
+              if kill -0 "${MPID}" 2>/dev/null; then
+                echo "::warning::PGO train pid ${MPID} still alive after TERM; sending KILL"
+                kill -KILL "${MPID}" 2>/dev/null || true
+              fi
+            fi
+            wait "${MPID}" 2>/dev/null || true
+            tail -20 "${LOGDIR}/bpe_pgo_train_${run}.log" || true
+          done
+
+          N_GCDA="$(find build-ci -name '*.gcda' 2>/dev/null | wc -l | tr -d '[:space:]')"
+          N_PROFRAW="$(find build-ci -name '*.profraw' 2>/dev/null | wc -l | tr -d '[:space:]')"
+          echo "PGO profiles: ${N_GCDA} .gcda, ${N_PROFRAW} .profraw under build-ci"
+
+          if [[ "${N_PROFRAW}" -ge 1 ]]; then
+            if command -v llvm-profdata >/dev/null 2>&1; then
+              MERGE_BIN=(llvm-profdata)
+            elif xcrun --find llvm-profdata >/dev/null 2>&1; then
+              MERGE_BIN=(xcrun llvm-profdata)
+            else
+              echo "::error::llvm-profdata not found (needed to merge Clang .profraw)"
+              exit 1
+            fi
+            # bash 3.2-safe (macOS /bin/bash): no mapfile.
+            PROFRAWS=()
+            while IFS= read -r _pr; do
+              PROFRAWS+=("${_pr}")
+            done < <(find build-ci -name '*.profraw' -print)
+            "${MERGE_BIN[@]}" merge -sparse "${PROFRAWS[@]}" -o build-ci/pgo/default.profdata
+            ls -la build-ci/pgo/default.profdata
+          fi
+
+          if [[ "${N_GCDA}" -lt 1 && ! -f build-ci/pgo/default.profdata ]]; then
+            echo "::error::no PGO profiles written — train did not flush (soft-exit/PGO)"
+            find build-ci -name '*.gcno' 2>/dev/null | head -20 || true
+            exit 1
+          fi
+
+          # 3) Optimized rebuild using profiles
+          cmake -S . -B build-ci -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DRNET_ENABLE_ICE=ON \
+            -DPSX_GAME_VERSION="${VERSION}" \
+            -DPSX_PGO=use \
+            "${EXTRA[@]}"
+          cmake --build build-ci --target psx-runtime -j"${JOBS}"
+          echo "PGO package binary ready (${{ matrix.artifact }})"
+
+      - name: Package
+        run: |
+          set -euo pipefail
+          chmod +x scripts/package_release.sh
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            export BPE_RUNTIME_BIN_DIR=/mingw64/bin
+          fi
+          scripts/package_release.sh build-ci "${{ matrix.artifact }}"
+          ls -la dist/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bpe-${{ matrix.artifact }}
+          path: dist/bpe-*-${{ matrix.artifact }}.zip
+          if-no-files-found: error
+          retention-days: 30
+
+  release:
+    name: GitHub Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: false
+
+      - name: Flatten zips
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          find artifacts -type f -name 'bpe-*.zip' -exec cp -v {} dist/ \;
+          ls -la dist/
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/bpe-*.zip
+          generate_release_notes: true
+          fail_on_unmatched_files: true
