@@ -257,8 +257,9 @@ jobs:
             EXTRA+=("-DCMAKE_OSX_DEPLOYMENT_TARGET=${CMAKE_OSX_DEPLOYMENT_TARGET}")
           fi
 
-          DISC_CUE='bpe/Bomberman Party Edition.cue'
-          DISC_BIN='bpe/Bomberman Party Edition.bin'
+          # Names match TechnicallyComputers/psxrecomp-ci-assets/bpe/ (Redump-style).
+          DISC_CUE='bpe/Bomberman - Party Edition (USA).cue'
+          DISC_BIN='bpe/Bomberman - Party Edition (USA).bin'
           BIOS_SRC=''
           for cand in \
               '_ci-assets/SCPH1001.BIN' \
