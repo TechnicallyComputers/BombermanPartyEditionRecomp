@@ -59,3 +59,4 @@ __pycache__/
 
 # Local BIOS (symlink or copy — do not commit)
 /bios/
+disc.cfg
