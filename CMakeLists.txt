@@ -73,25 +73,70 @@ endif()
 
 include("${PSXRECOMP_ROOT}/runtime/runtime.cmake")
 
-# Split-TU build: pick up sharded full_*.c if present, else the monolithic full.c.
-file(GLOB BPE_GENERATED_FULL_SHARDS CONFIGURE_DEPENDS
-    "${CMAKE_CURRENT_SOURCE_DIR}/generated/SLUS_011.89_full_*.c")
-if(BPE_GENERATED_FULL_SHARDS)
-    set(BPE_GENERATED_FULL "${BPE_GENERATED_FULL_SHARDS}")
-else()
-    set(BPE_GENERATED_FULL
-        "${CMAKE_CURRENT_SOURCE_DIR}/generated/SLUS_011.89_full.c")
-endif()
-set(BPE_GENERATED_DISPATCH
-    "${CMAKE_CURRENT_SOURCE_DIR}/generated/SLUS_011.89_dispatch.c")
+# ---- Setup host vs full game ----
+# When generated/ is missing (fresh clone / CI setup zip), build a BIOS-only
+# runtime that still links the generate & rebuild UI (PSX_HAS_GAME_CODEGEN).
+# After the user runs Generate & rebuild, cmake reconfigure sees the marker and
+# links real game C into the same target name (psx-runtime).
+option(BPE_FORCE_SETUP_HOST
+    "Build without linking game C even if generated/ exists" OFF)
+option(BPE_REQUIRE_GAME_C
+    "Fail configure if generated game C is missing (old CI behavior)" OFF)
 
-psxrecomp_add_runtime_target(psx-runtime
-    GAME_GENERATED_FULL_C "${BPE_GENERATED_FULL}"
-    GAME_GENERATED_DISPATCH_C "${BPE_GENERATED_DISPATCH}"
+set(BPE_GEN_MARKER
+    "${CMAKE_CURRENT_SOURCE_DIR}/generated/SLUS_011.89_dispatch.c")
+set(BPE_HAS_GAME_C FALSE)
+if(EXISTS "${BPE_GEN_MARKER}" AND NOT BPE_FORCE_SETUP_HOST)
+    set(BPE_HAS_GAME_C TRUE)
+endif()
+
+if(BPE_REQUIRE_GAME_C AND NOT BPE_HAS_GAME_C)
+    message(FATAL_ERROR
+        "BPE_REQUIRE_GAME_C=ON but ${BPE_GEN_MARKER} is missing. "
+        "Generate with psxrecomp-game --config game.toml, or leave "
+        "BPE_REQUIRE_GAME_C off to build the setup host.")
+endif()
+
+set(BPE_RUNTIME_EXTRA_ARGS
     DEBUG_PORT 4530
     WINDOW_TITLE "Bomberman Party Edition Recompiled"
     DEFAULT_GAME_CONFIG_PATH "game.toml"
     LAUNCHER_BOXART "${CMAKE_CURRENT_SOURCE_DIR}/launcher_assets/img/boxart.tga"
     GAME_VERSION "${PSX_GAME_VERSION}"
     MAX_PLAYERS 5
+    EXTRAS_SOURCES
+        "${CMAKE_CURRENT_SOURCE_DIR}/codegen_setup.c"
+        "${CMAKE_CURRENT_SOURCE_DIR}/host/psxrecomp_codegen_host.c"
+    )
+
+if(BPE_HAS_GAME_C)
+    message(STATUS "BPE: linking generated game C (full runtime)")
+    file(GLOB BPE_GENERATED_FULL_SHARDS CONFIGURE_DEPENDS
+        "${CMAKE_CURRENT_SOURCE_DIR}/generated/SLUS_011.89_full_*.c")
+    if(BPE_GENERATED_FULL_SHARDS)
+        set(BPE_GENERATED_FULL "${BPE_GENERATED_FULL_SHARDS}")
+    else()
+        set(BPE_GENERATED_FULL
+            "${CMAKE_CURRENT_SOURCE_DIR}/generated/SLUS_011.89_full.c")
+    endif()
+    set(BPE_GENERATED_DISPATCH "${BPE_GEN_MARKER}")
+
+    psxrecomp_add_runtime_target(psx-runtime
+        GAME_GENERATED_FULL_C "${BPE_GENERATED_FULL}"
+        GAME_GENERATED_DISPATCH_C "${BPE_GENERATED_DISPATCH}"
+        ${BPE_RUNTIME_EXTRA_ARGS}
+    )
+else()
+    message(STATUS
+        "BPE: setup host (no generated game C) — first-run Generate & rebuild")
+    psxrecomp_add_runtime_target(psx-runtime
+        ${BPE_RUNTIME_EXTRA_ARGS}
+    )
+endif()
+
+target_compile_definitions(psx-runtime PRIVATE PSX_HAS_GAME_CODEGEN=1)
+target_include_directories(psx-runtime PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/host"
+    "${RECOMP_UI_ROOT}/src"
 )

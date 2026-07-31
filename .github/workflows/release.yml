@@ -1,25 +1,21 @@
-# Build BPE Release packages for Linux, Windows, macOS (arm64 + Intel).
-# Does not ship BIOS or disc images in the player zip.
+# Build BPE setup-host packages for Linux, Windows, macOS (arm64 + Intel).
+# Ships a GUI generate & rebuild host + sources + psxrecomp-game — not game C,
+# BIOS, or disc images. Users supply a legal disc; first-run builds playable
+# binary locally (see psxrecomp/docs/LOCAL_CODEGEN_SDK.md).
 #
 # Requires:
-#   - generated/ (recompiled game C) committed in this repo for CI.
 #   - Secret CI_ASSETS_TOKEN: fine-grained PAT with Contents:Read on
-#     TechnicallyComputers/psxrecomp-ci-assets (private). That repo supplies:
-#       - SCPH1001.BIN + bpe/*.cue|*.bin (Git LFS) for BIOS regen + intro PGO
-#     Link-time BIOS C is regenerated on the runner (OpenBIOS from the bundled
-#     MIT image; SCPH1001 from the LFS dump) so it matches the current emitter
-#     backend-descriptor ABI. The old SCPH1001.zip pre-dates that ABI and is
-#     ignored. Players still pick BIOS + disc at first launch; neither is in
-#     the zip.
+#     TechnicallyComputers/psxrecomp-ci-assets (private). That repo supplies
+#     SCPH1001.BIN (Git LFS) for BIOS regen on the runner (OpenBIOS + retail
+#     link-time BIOS C). Players still pick BIOS + disc at first launch.
 #
 # Framework deps use this repository's exact gitlink pins:
 #   - psxrecomp at the game root (which owns its recomp-net pin)
 #   - recomp-ui at the game root
 #
-# All matrix packages are PGO-trained on the BPE intro + OPENING.STR
-# (instrument → train → use) on that runner's toolchain (GCC .gcda on
-# Linux/Windows; Clang .profraw→profdata on macOS). Profiles are not
-# portable across OS/arch.
+# PGO is local-only. CI builds plain Release — do not set PSX_PGO here.
+# Toolchains are NOT embedded — RetComM fetches cmake-clang-v1 from
+# TechnicallyComputers/retcomm-toolchains on demand.
 #
 # Triggers:
 #   - workflow_dispatch (manual)
@@ -54,21 +50,17 @@ jobs:
           - os: ubuntu-24.04
             artifact: linux-x64
             shell: bash
-            pgo: true
           - os: windows-2022
             artifact: windows-x64
             shell: 'msys2 {0}'
-            pgo: true
           - os: macos-15
             artifact: macos-arm64
             shell: bash
             deployment_target: '11.0'
-            pgo: true
           - os: macos-15-intel
             artifact: macos-x64
             shell: bash
             deployment_target: '11.0'
-            pgo: true
 
     defaults:
       run:
@@ -117,21 +109,16 @@ jobs:
           fetch-depth: 1
           lfs: true
 
-      - name: Require generated game C
+      - name: Setup host mode (no game generated C required)
         shell: bash
         run: |
           set -euo pipefail
-          if [[ ! -f generated/SLUS_011.89_dispatch.c ]]; then
-            echo "::error::generated/ is missing. BPE CI expects committed recompiler output."
-            echo "Regenerate with psxrecomp-game --config game.toml and commit generated/."
-            exit 1
+          if [[ -f generated/SLUS_011.89_dispatch.c ]]; then
+            echo "Note: generated/ is present; CI still builds a setup zip."
+            echo "Force setup-only link with -DBPE_FORCE_SETUP_HOST=ON."
+          else
+            echo "generated/ absent — configuring setup host (expected)."
           fi
-          if ! compgen -G 'generated/SLUS_011.89_full_*.c' >/dev/null && \
-             [[ ! -f generated/SLUS_011.89_full.c ]]; then
-            echo "::error::generated/ has no SLUS_011.89_full_*.c shards (or full.c)."
-            exit 1
-          fi
-          echo "generated/ OK ($(ls generated/SLUS_011.89_full_*.c 2>/dev/null | wc -l) shards)"
 
       - name: Setup MSYS2 (Windows)
         if: runner.os == 'Windows'
@@ -204,13 +191,21 @@ jobs:
 
           cmake -S psxrecomp/recompiler -B build-recompiler -G Ninja \
             -DCMAKE_BUILD_TYPE=Release
-          cmake --build build-recompiler --target psxrecomp-bios -j"${JOBS}"
+          cmake --build build-recompiler \
+            --target psxrecomp-bios psxrecomp-game -j"${JOBS}"
 
           # MSYS sees PE files without +x; chmod so bash can exec them.
-          if [[ -f build-recompiler/psxrecomp-bios.exe ]]; then
-            chmod +x build-recompiler/psxrecomp-bios.exe
-          elif [[ -f build-recompiler/psxrecomp-bios ]]; then
-            chmod +x build-recompiler/psxrecomp-bios
+          for bin in psxrecomp-bios psxrecomp-game; do
+            if [[ -f "build-recompiler/${bin}.exe" ]]; then
+              chmod +x "build-recompiler/${bin}.exe"
+            elif [[ -f "build-recompiler/${bin}" ]]; then
+              chmod +x "build-recompiler/${bin}"
+            fi
+          done
+          if [[ ! -f build-recompiler/psxrecomp-game && \
+                ! -f build-recompiler/psxrecomp-game.exe ]]; then
+            echo "::error::psxrecomp-game missing after recompiler build"
+            exit 1
           fi
 
           (
@@ -236,8 +231,7 @@ jobs:
             echo "BIOS ${stem}: OK ($(wc -c < "psxrecomp/generated/${stem}_full.c") bytes)"
           done
 
-      - name: Configure & build (no PGO)
-        if: ${{ !matrix.pgo }}
+      - name: Configure & build setup host (Release, no game C link)
         env:
           CMAKE_OSX_DEPLOYMENT_TARGET: ${{ matrix.deployment_target || '' }}
         run: |
@@ -248,175 +242,43 @@ jobs:
             EXTRA+=("-DCMAKE_OSX_DEPLOYMENT_TARGET=${CMAKE_OSX_DEPLOYMENT_TARGET}")
           fi
           JOBS="$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)"
+          # BPE_FORCE_SETUP_HOST: never link committed generated/ into the CI zip.
           cmake -S . -B build-ci -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DRNET_ENABLE_ICE=ON \
+            -DBPE_FORCE_SETUP_HOST=ON \
             -DPSX_GAME_VERSION="${VERSION}" \
             "${EXTRA[@]}"
           cmake --build build-ci --target psx-runtime -j"${JOBS}"
 
-      - name: Configure, PGO train intro, rebuild
-        if: ${{ matrix.pgo }}
-        env:
-          # Opening FMV is longer than MotK crawl; keep CI under ~4 min train.
-          PGO_TRAIN_SECS: '100'
-          PGO_TRAIN_RUNS: '2'
-          CMAKE_OSX_DEPLOYMENT_TARGET: ${{ matrix.deployment_target || '' }}
+      - name: Package setup zip (sources + tools + host)
         run: |
           set -euo pipefail
-          VERSION="$(tr -d '[:space:]' < VERSION)"
-          JOBS="$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)"
-          LOGDIR="${TMPDIR:-/tmp}"
-          mkdir -p "${LOGDIR}"
-          EXTRA=()
-          if [[ -n "${CMAKE_OSX_DEPLOYMENT_TARGET:-}" ]]; then
-            EXTRA+=("-DCMAKE_OSX_DEPLOYMENT_TARGET=${CMAKE_OSX_DEPLOYMENT_TARGET}")
-          fi
-
-          # Names match TechnicallyComputers/psxrecomp-ci-assets/bpe/ (Redump-style).
-          DISC_CUE='bpe/Bomberman - Party Edition (USA).cue'
-          DISC_BIN='bpe/Bomberman - Party Edition (USA).bin'
-          BIOS_SRC=''
-          for cand in \
-              '_ci-assets/SCPH1001.BIN' \
-              '_ci-assets/SCPH1001.bin' \
-              '_ci-assets/bios/SCPH1001.BIN' \
-              '_ci-assets/bios/SCPH1001.bin'; do
-            if [[ -f "$cand" ]]; then BIOS_SRC="$cand"; break; fi
-          done
-          if [[ -z "${BIOS_SRC}" ]]; then
-            echo "::error::SCPH1001.BIN missing under _ci-assets (need real BIOS for PGO train)"
-            find _ci-assets -maxdepth 2 -type f | head -40
-            exit 1
-          fi
-          if [[ ! -f "_ci-assets/${DISC_CUE}" || ! -f "_ci-assets/${DISC_BIN}" ]]; then
-            echo "::error::BPE cue/bin missing under _ci-assets/bpe (LFS pull?)"
-            ls -la _ci-assets/bpe || true
-            exit 1
-          fi
-          # Pointer files are ~130 bytes; real BIN is hundreds of MB.
-          BIN_SZ="$(wc -c < "_ci-assets/${DISC_BIN}" | tr -d '[:space:]')"
-          if [[ "${BIN_SZ}" -lt 100000000 ]]; then
-            echo "::error::disc .bin is only ${BIN_SZ} bytes — Git LFS did not materialize"
-            exit 1
-          fi
-          BIOS_SZ="$(wc -c < "${BIOS_SRC}" | tr -d '[:space:]')"
-          if [[ "${BIOS_SZ}" -lt 500000 || "${BIOS_SZ}" -gt 600000 ]]; then
-            echo "::error::BIOS size ${BIOS_SZ} looks wrong (want ~512 KiB)"
-            exit 1
-          fi
-
-          mkdir -p bios bpe
-          cp -f "${BIOS_SRC}" bios/SCPH1001.BIN
-          cp -f "_ci-assets/${DISC_CUE}" "${DISC_CUE}"
-          cp -f "_ci-assets/${DISC_BIN}" "${DISC_BIN}"
-          echo "PGO train assets: bios=${BIOS_SZ} disc_bin=${BIN_SZ} jobs=${JOBS}"
-
-          # 1) Instrumented build
-          cmake -S . -B build-ci -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DRNET_ENABLE_ICE=ON \
-            -DPSX_GAME_VERSION="${VERSION}" \
-            -DPSX_PGO=generate \
-            "${EXTRA[@]}"
-          cmake --build build-ci --target psx-runtime -j"${JOBS}"
-
-          EXE=./build-ci/Bomberman_Party_Edition_Recompiled
-          if [[ -f "${EXE}.exe" ]]; then EXE="${EXE}.exe"; fi
-          if [[ ! -f "${EXE}" ]]; then
-            echo "::error::missing train binary ${EXE}"
-            ls -la build-ci | head -40
-            exit 1
-          fi
-
-          # 2) Train on logos + OPENING.STR (headless; merge profiles across runs)
-          rm -rf build-ci/pgo
-          mkdir -p build-ci/pgo
-          export SDL_VIDEODRIVER=dummy
-          export PSX_HEADLESS=1
-          # Prefer LLE BIOS for train (game.toml defaults bios_hle=true).
-          export PSX_BIOS_HLE=0
-          # Clang/AppleClang instr-PGO; ignored by GCC gcov path.
-          export LLVM_PROFILE_FILE="${PWD}/build-ci/pgo/bpe-%p.profraw"
-          for run in $(seq 1 "${PGO_TRAIN_RUNS}"); do
-            echo "PGO train run ${run}/${PGO_TRAIN_RUNS} (${PGO_TRAIN_SECS}s)..."
-            "${EXE}" --no-launcher --headless \
-              --game game.toml \
-              --disc "${DISC_CUE}" \
-              --bios bios/SCPH1001.BIN \
-              >"${LOGDIR}/bpe_pgo_train_${run}.log" 2>&1 &
-            MPID=$!
-            sleep "${PGO_TRAIN_SECS}"
-            # Soft-stop: runtime maps SIGTERM/SIGINT → exit(0) so PGO
-            # writers flush. Bare kill without that leaves 0 profiles.
-            if kill -0 "${MPID}" 2>/dev/null; then
-              kill -TERM "${MPID}" 2>/dev/null || true
-              for _ in $(seq 1 30); do
-                kill -0 "${MPID}" 2>/dev/null || break
-                sleep 1
-              done
-              if kill -0 "${MPID}" 2>/dev/null; then
-                echo "::warning::PGO train pid ${MPID} still alive after TERM; sending KILL"
-                kill -KILL "${MPID}" 2>/dev/null || true
-              fi
-            fi
-            wait "${MPID}" 2>/dev/null || true
-            tail -20 "${LOGDIR}/bpe_pgo_train_${run}.log" || true
-          done
-
-          N_GCDA="$(find build-ci -name '*.gcda' 2>/dev/null | wc -l | tr -d '[:space:]')"
-          N_PROFRAW="$(find build-ci -name '*.profraw' 2>/dev/null | wc -l | tr -d '[:space:]')"
-          echo "PGO profiles: ${N_GCDA} .gcda, ${N_PROFRAW} .profraw under build-ci"
-
-          if [[ "${N_PROFRAW}" -ge 1 ]]; then
-            if command -v llvm-profdata >/dev/null 2>&1; then
-              MERGE_BIN=(llvm-profdata)
-            elif xcrun --find llvm-profdata >/dev/null 2>&1; then
-              MERGE_BIN=(xcrun llvm-profdata)
-            else
-              echo "::error::llvm-profdata not found (needed to merge Clang .profraw)"
-              exit 1
-            fi
-            # bash 3.2-safe (macOS /bin/bash): no mapfile.
-            PROFRAWS=()
-            while IFS= read -r _pr; do
-              PROFRAWS+=("${_pr}")
-            done < <(find build-ci -name '*.profraw' -print)
-            "${MERGE_BIN[@]}" merge -sparse "${PROFRAWS[@]}" -o build-ci/pgo/default.profdata
-            ls -la build-ci/pgo/default.profdata
-          fi
-
-          if [[ "${N_GCDA}" -lt 1 && ! -f build-ci/pgo/default.profdata ]]; then
-            echo "::error::no PGO profiles written — train did not flush (soft-exit/PGO)"
-            find build-ci -name '*.gcno' 2>/dev/null | head -20 || true
-            exit 1
-          fi
-
-          # 3) Optimized rebuild using profiles
-          cmake -S . -B build-ci -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DRNET_ENABLE_ICE=ON \
-            -DPSX_GAME_VERSION="${VERSION}" \
-            -DPSX_PGO=use \
-            "${EXTRA[@]}"
-          cmake --build build-ci --target psx-runtime -j"${JOBS}"
-          echo "PGO package binary ready (${{ matrix.artifact }})"
-
-      - name: Package
-        run: |
-          set -euo pipefail
-          chmod +x scripts/package_release.sh
+          chmod +x scripts/package_setup_release.sh
+          chmod +x scripts/package_psxrecomp_tools.sh
           if [[ "${{ runner.os }}" == "Windows" ]]; then
             export BPE_RUNTIME_BIN_DIR=/mingw64/bin
           fi
-          scripts/package_release.sh build-ci "${{ matrix.artifact }}"
+          # Do not embed toolchains — fetch via RetComM / retcomm-toolchains.
+          scripts/package_setup_release.sh build-ci "${{ matrix.artifact }}" build-recompiler
+          # Overlay vendored SDK surface, then pack cli + psxrecomp-game.
+          cp -a psxrecomp-sdk/. psxrecomp/
+          mkdir -p psxrecomp/recompiler/build
+          for cand in build-recompiler/psxrecomp-game build-recompiler/psxrecomp-game.exe; do
+            if [[ -f "$cand" ]]; then
+              cp -a "$cand" "psxrecomp/recompiler/build/$(basename "$cand")"
+            fi
+          done
+          scripts/package_psxrecomp_tools.sh psxrecomp "${{ matrix.artifact }}" dist
           ls -la dist/
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: bpe-${{ matrix.artifact }}
-          path: dist/bpe-*-${{ matrix.artifact }}.zip
+          path: |
+            dist/bpe-*-${{ matrix.artifact }}.zip
+            dist/psxrecomp-tools-${{ matrix.artifact }}.zip
           if-no-files-found: error
           retention-days: 30
 
@@ -436,12 +298,15 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
-          find artifacts -type f -name 'bpe-*.zip' -exec cp -v {} dist/ \;
+          find artifacts -type f \( -name 'bpe-*.zip' -o -name 'psxrecomp-tools-*.zip' \) \
+            -exec cp -v {} dist/ \;
           ls -la dist/
 
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/bpe-*.zip
+          files: |
+            dist/bpe-*.zip
+            dist/psxrecomp-tools-*.zip
           generate_release_notes: true
           fail_on_unmatched_files: true

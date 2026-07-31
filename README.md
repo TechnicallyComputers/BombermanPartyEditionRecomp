@@ -3,8 +3,9 @@
 *Bomberman Party Edition* (USA, **SLUS-01189**) — game project for
 [PSXRecomp](https://github.com/mstan/psxrecomp).
 
-Holds game config, seeds, build glue, and (for private CI) recompiler
-`generated/` output. Disc images and BIOS stay local and gitignored.
+Holds game config, seeds, and build glue. CI ships a **setup host** (no game
+`generated/` in the zip); users generate locally from a legal disc. Disc images
+and BIOS stay local and gitignored.
 
 ## Layout
 
@@ -14,22 +15,26 @@ Holds game config, seeds, build glue, and (for private CI) recompiler
 | `seeds/` | Function-start seeds for `psxrecomp-game` |
 | `bpe/` | Local disc `.bin`/`.cue`, `SLUS_011.89`, `SYSTEM.CNF` (gitignored) |
 | `psxrecomp/` | Framework submodule (`mstan/psxrecomp`) |
-| `generated/` | Recompiler output (tracked for CI; regenerate when seeds change) |
+| `generated/` | Local recompiler output (created by Generate & rebuild; not required for CI setup host) |
 | `VERSION` | Release / lobby match pin (e.g. `0.1.0`) |
 | `DISC.md` | Disc identity + hashes |
-| `tools/prepare_disc.py` | Rebuild `bpe/` from the source dump |
+| `psxrecomp/tools/prepare_disc.py` | Framework disc normalize (config from `game.toml`) |
+| `tools/prepare_disc.py` | Thin wrapper → framework tool |
 
 ## Disc
 
-Source dump (irregular raw CD with subchannel; see `DISC.md`):
-
-`/mnt/crucial4tb/Emulation/roms/ps/Bomberman Party Edition.iso`
-
-Working image for the runtime is MODE2/2352 under `bpe/`. Recreate with:
+Preferred: Redump USA `.bin`/`.cue` (see `DISC.md`). Also accepts cooked
+2048-byte `.iso` files common in RomM-style libraries — the script rebuilds a
+MODE2/2352 working image under `bpe/`. Digests and output names live in
+`game.toml` `[prepare_disc]`.
 
 ```bash
-python3 tools/prepare_disc.py
+python3 psxrecomp/tools/prepare_disc.py --config game.toml \
+  "/path/to/Bomberman - Party Edition (USA).bin"
+python3 tools/prepare_disc.py "/path/to/Bomberman Party Edition.iso"
 ```
+
+On success it prints `RESULT_CUE=…` for the first-run wizard / host glue.
 
 ## Bring-up (next steps)
 
@@ -85,17 +90,30 @@ Build only: `bash scripts/build_windows_mingw.sh --no-package`
 Dynamic SDL2/libgcc (bundle DLLs): `bash scripts/build_windows_mingw.sh --dynamic`  
 Repack: `bash scripts/package_release.sh build-mingw-netplay windows-x64-mingw`
 
-### PGO (intro + OPENING.STR)
+### Setup host / local generate / rebuild
 
-Profile-guided optimization trains the compiler on logos through the opening
-FMV. One-shot (windowed; prefer a real display so present/audio paths count):
+Configure without `generated/` (or `-DBPE_FORCE_SETUP_HOST=ON`) to build a
+BIOS-only **setup host** with the Generate & rebuild UI. After generate,
+reconfigure+build links real game C into the same `psx-runtime` target.
+
+Release zips use `scripts/package_setup_release.sh` (sources + `psxrecomp-game`
++ optional `toolchain/`). Tool packs: `scripts/package_psxrecomp_tools.sh` (SDK surface in `psxrecomp-sdk/`).
+
+When `generated/` is missing (or `BPE_FORCE_SETUP=1`), the launcher offers
+**Generate & rebuild** via `psxrecomp/psxrecomp_cli.py` (see
+`psxrecomp/docs/LOCAL_CODEGEN_SDK.md`). BPE ships with `[pgo] enabled = false`
+— plain Release is enough; setup does not run a PGO train.
 
 ```bash
-DISPLAY=:0 ./scripts/pgo_bpe_intro.sh
+# Headless generate + rebuild:
+python3 psxrecomp/psxrecomp_cli.py generate --config game.toml \
+  --disc "/path/to/Bomberman - Party Edition (USA).bin"
+python3 psxrecomp/psxrecomp_cli.py rebuild --config game.toml \
+  --build-dir build-release --exe-basename Bomberman_Party_Edition_Recompiled
 ```
 
-Optional: `PGO_TRAIN_RUNS=3` `PGO_TRAIN_SECS=120`. After large runtime edits,
-retrain so profiles stay fresh (`-DPSX_PGO=use` with stale `.gcda` underperforms).
+Optional local PGO (not used by BPE setup): set `[pgo] enabled = true` or run
+`scripts/pgo_bpe_intro.sh`.
 
 ## CI / release packages
 
@@ -114,9 +132,7 @@ GitHub Actions workflow: `.github/workflows/release.yml`
   `VERSION` — never BIOS/disc
 - CI builds the exact committed **psxrecomp**, game-root **recomp-ui**, and
   nested **recomp-net** gitlink pins
-- CI configures `-DRNET_ENABLE_ICE=ON`. Every matrix OS runs intro PGO train
-  on that runner (needs LFS disc + `SCPH1001.BIN` in `psxrecomp-ci-assets`
-  under `bpe/`; GCC `.gcda` on Linux/Windows, Clang profdata on macOS)
+- CI configures `-DRNET_ENABLE_ICE=ON` and builds plain Release (no `PSX_PGO`)
 - Local pack: `scripts/package_release.sh build-release linux-x64`
 
 Clone with submodules:
