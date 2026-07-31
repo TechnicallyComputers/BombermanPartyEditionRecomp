@@ -16,7 +16,7 @@ and BIOS stay local and gitignored.
 | `bpe/` | Local disc `.bin`/`.cue`, `SLUS_011.89`, `SYSTEM.CNF` (gitignored) |
 | `psxrecomp/` | Framework submodule (`mstan/psxrecomp`) |
 | `generated/` | Local recompiler output (created by Generate & rebuild; not required for CI setup host) |
-| `VERSION` | Release / lobby match pin (e.g. `0.1.0`) |
+| `VERSION` | Release / lobby match pin (e.g. `0.1.1`) |
 | `DISC.md` | Disc identity + hashes |
 | `psxrecomp/tools/prepare_disc.py` | Framework disc normalize (config from `game.toml`) |
 | `tools/prepare_disc.py` | Thin wrapper → framework tool |
@@ -129,7 +129,7 @@ GitHub Actions workflow: `.github/workflows/release.yml`
 | `macos-x64` | `macos-15-intel` (older Intel Macs) |
 
 - Manual: **Actions → Release builds → Run workflow**
-- Tag `v0.1.0` (matching `VERSION`): builds + GitHub Release with zips
+- Tag `v0.1.1` (matching `VERSION`): builds + GitHub Release with zips
 - Packages include the exe, `assets/` (recomp-ui fonts/img), `game.toml`, and
   `VERSION` — never BIOS/disc
 - CI builds the exact committed **psxrecomp**, game-root **recomp-ui**, and
