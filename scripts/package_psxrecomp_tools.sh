@@ -25,6 +25,8 @@ if [[ ! -f "$PSX_ROOT/psxrecomp_cli.py" ]]; then
 fi
 
 PSX_ROOT="$(cd "$PSX_ROOT" && pwd)"
+mkdir -p "$OUT"
+OUT="$(cd "$OUT" && pwd)"
 STAGE="$OUT/stage-psxrecomp-tools-$OS_TAG"
 ZIP_NAME="psxrecomp-tools-${OS_TAG}.zip"
 
@@ -59,7 +61,7 @@ if [[ -z "$BIOS_BIN" ]]; then
 fi
 
 rm -rf "$STAGE"
-mkdir -p "$STAGE/recompiler/build" "$STAGE/docs" "$OUT"
+mkdir -p "$STAGE/recompiler/build" "$STAGE/docs"
 
 copy_tree() {
   local src="$1" dest="$2"
