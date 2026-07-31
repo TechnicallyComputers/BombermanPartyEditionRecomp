@@ -128,14 +128,15 @@ GitHub Actions workflow: `.github/workflows/release.yml`
 | `macos-arm64` | `macos-15` |
 | `macos-x64` | `macos-15-intel` (older Intel Macs) |
 
-- Manual: **Actions → Release builds → Run workflow**
-- Tag `v0.1.1` (matching `VERSION`): builds + GitHub Release with zips
-- Packages include the exe, `assets/` (recomp-ui fonts/img), `game.toml`, and
-  `VERSION` — never BIOS/disc
+- Manual: **Actions → Release builds → Run workflow** — enter version
+  (e.g. `0.1.2`); with **publish** enabled, CI tags `vX.Y.Z` and creates the
+  GitHub Release
+- Or push tag `vX.Y.Z`: same build + publish for that version
+- Packages use the chosen version (lobby pin + `bpe-<ver>-*.zip`), not a
+  fixed repo `VERSION` file — never BIOS/disc
 - CI builds the exact committed **psxrecomp**, game-root **recomp-ui**, and
   nested **recomp-net** gitlink pins
-- CI configures `-DRNET_ENABLE_ICE=ON` and builds plain Release (no `PSX_PGO`)
-- Local pack: `scripts/package_release.sh build-release linux-x64`
+- Local pack: `BPE_RELEASE_VERSION=0.1.2 scripts/package_setup_release.sh …`
 
 Clone with submodules:
 

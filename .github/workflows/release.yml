@@ -5,28 +5,30 @@
 #
 # No private CI assets. No BIOS dumps. No generated/ required.
 #
-# Framework deps use this repository's exact gitlink pins:
-#   - psxrecomp at the game root (which owns its recomp-net pin)
-#   - recomp-ui at the game root
-#
-# PGO is local-only. CI builds plain Release — do not set PSX_PGO here.
-# Toolchains are NOT embedded — RetComM fetches cmake-clang-v1 from
-# TechnicallyComputers/retcomm-toolchains on demand.
-#
 # Triggers:
-#   - workflow_dispatch (manual)
-#   - push tags matching v* (publishes a GitHub Release)
+#   - workflow_dispatch — prompts for version; optionally tags + publishes
+#   - push tags matching v* — builds + publishes that tag
 
 name: Release builds
 
 on:
   workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g. 0.1.2 or v0.1.2)'
+        required: true
+        type: string
+      publish:
+        description: 'Create git tag vX.Y.Z and GitHub Release'
+        required: true
+        type: boolean
+        default: true
   push:
     tags:
       - 'v*'
 
 concurrency:
-  group: bpe-release-${{ github.ref }}
+  group: bpe-release-${{ github.event_name }}-${{ github.ref }}-${{ github.run_id }}
   cancel-in-progress: true
 
 permissions:
@@ -36,8 +38,45 @@ env:
   CMAKE_BUILD_TYPE: Release
 
 jobs:
+  prepare:
+    name: Resolve version
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      tag: ${{ steps.meta.outputs.tag }}
+      publish: ${{ steps.meta.outputs.publish }}
+    steps:
+      - name: Normalize version / tag
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            RAW="${{ github.event.inputs.version }}"
+            PUBLISH="${{ github.event.inputs.publish }}"
+          else
+            RAW="${{ github.ref_name }}"
+            PUBLISH="true"
+          fi
+          RAW="$(printf '%s' "${RAW}" | tr -d '[:space:]')"
+          if [[ -z "${RAW}" ]]; then
+            echo "::error::version is empty"
+            exit 1
+          fi
+          VER="${RAW#v}"
+          if [[ ! "${VER}" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.+-][A-Za-z0-9.+-]*)?$ ]]; then
+            echo "::error::invalid version '${RAW}' (want X.Y.Z or vX.Y.Z)"
+            exit 1
+          fi
+          TAG="v${VER}"
+          echo "version=${VER}" >>"$GITHUB_OUTPUT"
+          echo "tag=${TAG}" >>"$GITHUB_OUTPUT"
+          echo "publish=${PUBLISH}" >>"$GITHUB_OUTPUT"
+          echo "Using version ${VER} (tag ${TAG}), publish=${PUBLISH}"
+
   build:
     name: ${{ matrix.artifact }}
+    needs: prepare
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -62,12 +101,22 @@ jobs:
       run:
         shell: ${{ matrix.shell }}
 
+    env:
+      BPE_RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           submodules: recursive
           fetch-depth: 1
+
+      - name: Pin VERSION for this release
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s\n' "${BPE_RELEASE_VERSION}" >VERSION
+          echo "VERSION=$(cat VERSION)"
 
       - name: Record pinned framework revisions
         shell: bash
@@ -141,7 +190,6 @@ jobs:
           CMAKE_OSX_DEPLOYMENT_TARGET: ${{ matrix.deployment_target || '' }}
         run: |
           set -euo pipefail
-          VERSION="$(tr -d '[:space:]' < VERSION)"
           EXTRA=()
           if [[ -n "${CMAKE_OSX_DEPLOYMENT_TARGET:-}" ]]; then
             EXTRA+=("-DCMAKE_OSX_DEPLOYMENT_TARGET=${CMAKE_OSX_DEPLOYMENT_TARGET}")
@@ -151,7 +199,7 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release \
             -DBPE_FORCE_SETUP_HOST=ON \
             -DPSXRECOMP_ALLOW_NO_BIOS=ON \
-            -DPSX_GAME_VERSION="${VERSION}" \
+            -DPSX_GAME_VERSION="${BPE_RELEASE_VERSION}" \
             "${EXTRA[@]}"
           cmake --build build-ci --target psx-runtime -j"${JOBS}"
 
@@ -163,6 +211,7 @@ jobs:
           if [[ "${{ runner.os }}" == "Windows" ]]; then
             export BPE_RUNTIME_BIN_DIR=/mingw64/bin
           fi
+          export BPE_RELEASE_VERSION
           scripts/package_setup_release.sh build-ci "${{ matrix.artifact }}" build-recompiler
           # Overlay vendored SDK surface, then pack cli + emitters.
           cp -a psxrecomp-sdk/. psxrecomp/
@@ -191,10 +240,15 @@ jobs:
 
   release:
     name: GitHub Release
-    needs: build
-    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [prepare, build]
+    if: needs.prepare.outputs.publish == 'true'
     runs-on: ubuntu-24.04
     steps:
+      - name: Checkout (for tagging on workflow_dispatch)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
@@ -209,11 +263,34 @@ jobs:
             -exec cp -v {} dist/ \;
           ls -la dist/
 
+      - name: Ensure release tag exists
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
+            echo "Tag ${TAG} already exists locally"
+          else
+            git tag -a "${TAG}" -m "Bomberman Party Edition ${TAG}"
+          fi
+          # Push tag if missing on remote (idempotent).
+          if git ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null 2>&1; then
+            echo "Tag ${TAG} already on origin"
+          else
+            git push origin "refs/tags/${TAG}"
+          fi
+
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ needs.prepare.outputs.tag }}
+          name: Bomberman Party Edition ${{ needs.prepare.outputs.tag }}
           files: |
             dist/bpe-*.zip
             dist/psxrecomp-tools-*.zip
           generate_release_notes: true
           fail_on_unmatched_files: true
+          target_commitish: ${{ github.sha }}

@@ -28,11 +28,19 @@ if [[ -z "${BUILD_DIR}" || -z "${ARTIFACT_TAG}" ]]; then
   exit 2
 fi
 
-VERSION="$(tr -d '[:space:]' < "${ROOT}/VERSION")"
+# Prefer CI/manual override, else repo VERSION pin.
+VERSION="${BPE_RELEASE_VERSION:-}"
 if [[ -z "${VERSION}" ]]; then
-  echo "VERSION file is empty" >&2
+  VERSION="$(tr -d '[:space:]' < "${ROOT}/VERSION")"
+fi
+VERSION="$(printf '%s' "${VERSION}" | tr -d '[:space:]')"
+VERSION="${VERSION#v}"
+if [[ -z "${VERSION}" ]]; then
+  echo "VERSION empty (set BPE_RELEASE_VERSION or write VERSION file)" >&2
   exit 1
 fi
+# Keep staged tree / lobby pin consistent with the package name.
+printf '%s\n' "${VERSION}" >"${ROOT}/VERSION"
 
 BUILD_DIR="$(cd "${BUILD_DIR}" && pwd)"
 DIST="${ROOT}/dist"
