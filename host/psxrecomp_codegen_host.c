@@ -86,16 +86,31 @@ static int dirname_copy(char* out, size_t cap, const char* path) {
     return 1;
 }
 
+static int resolve_cli_path(const char* root, char* out, size_t cap) {
+    const char* candidates[] = {
+        cfg_or(g_cfg->psxrecomp_cli_relpath, "psxrecomp/psxrecomp_cli.py"),
+        "psxrecomp/psxrecomp_cli.py",
+        "psxrecomp-sdk/psxrecomp_cli.py",
+    };
+    for (size_t i = 0; i < sizeof(candidates) / sizeof(candidates[0]); ++i) {
+        if (!candidates[i] || !candidates[i][0])
+            continue;
+        if (!join_path(out, cap, root, candidates[i]))
+            continue;
+        if (path_is_file(out))
+            return 1;
+    }
+    return 0;
+}
+
 static int looks_like_project_root(const char* root) {
     char cli[1100], toml[1100];
-    if (!join_path(cli, sizeof(cli), root,
-                   cfg_or(g_cfg->psxrecomp_cli_relpath,
-                          "psxrecomp/psxrecomp_cli.py")))
-        return 0;
     if (!join_path(toml, sizeof(toml), root,
                    cfg_or(g_cfg->seed_cfg_relpath, "game.toml")))
         return 0;
-    return path_is_file(cli) && path_is_file(toml);
+    if (!path_is_file(toml))
+        return 0;
+    return resolve_cli_path(root, cli, sizeof(cli));
 }
 
 static int find_on_path(const char* name, char* out, size_t cap) {
@@ -692,21 +707,39 @@ void psxrecomp_codegen_host_apply(RecompLauncherCGameInfo* gi,
     snprintf(g_cmake_target, sizeof(g_cmake_target), "%s", cfg->cmake_target);
     snprintf(g_exe_basename, sizeof(g_exe_basename), "%s", cfg->exe_basename);
 
-    if (!discover_project_root(g_project_root, sizeof(g_project_root)))
+    const char* force_env =
+        cfg_or(cfg->force_setup_env, "PSXRECOMP_FORCE_SETUP");
+    const char* force = getenv(force_env);
+    const int force_setup = force && force[0] && force[0] != '0';
+
+    if (!discover_project_root(g_project_root, sizeof(g_project_root))) {
+        /* Still force the wizard when generated/ is missing — discover may
+         * fail if the process cwd is unrelated to the project tree. */
+        if (force_setup) {
+            gi->needs_setup = 1;
+            gi->prepare_required_before_continue = 1;
+        }
         return;
-    if (!join_path(g_cli_path, sizeof(g_cli_path), g_project_root,
-                   cfg_or(cfg->psxrecomp_cli_relpath,
-                          "psxrecomp/psxrecomp_cli.py")))
+    }
+    if (!resolve_cli_path(g_project_root, g_cli_path, sizeof(g_cli_path))) {
+        if (psxrecomp_codegen_host_sources_missing(cfg) || force_setup) {
+            gi->needs_setup = 1;
+            gi->prepare_required_before_continue = 1;
+        }
         return;
-    if (!path_is_file(g_cli_path))
-        return;
+    }
     if (!join_path(g_game_toml, sizeof(g_game_toml), g_project_root,
                    cfg_or(cfg->game_toml_relpath, "game.toml")))
         return;
     if (!path_is_file(g_game_toml))
         return;
-    if (!find_python(g_python, sizeof(g_python)))
+    if (!find_python(g_python, sizeof(g_python))) {
+        if (psxrecomp_codegen_host_sources_missing(cfg) || force_setup) {
+            gi->needs_setup = 1;
+            gi->prepare_required_before_continue = 1;
+        }
         return;
+    }
 
     g_ready = 1;
     gi->prepare_with_progress = host_prepare_generate;
@@ -753,11 +786,7 @@ void psxrecomp_codegen_host_apply(RecompLauncherCGameInfo* gi,
             "Sources generated. Rebuild manually, then relaunch.";
     }
 
-    const char* force_env =
-        cfg_or(cfg->force_setup_env, "PSXRECOMP_FORCE_SETUP");
-    const char* force = getenv(force_env);
-    if (psxrecomp_codegen_host_sources_missing(cfg) ||
-        (force && force[0] && force[0] != '0')) {
+    if (psxrecomp_codegen_host_sources_missing(cfg) || force_setup) {
         gi->needs_setup = 1;
         gi->prepare_required_before_continue = 1;
     }
