@@ -72,7 +72,9 @@ On success the script prints `RESULT_CUE=…` for the launcher/host to pick up.
 
 ## Local generate & rebuild
 
-Missing `generated/SLUS_011.89_dispatch.c` (or `BPE_FORCE_SETUP=1`) opens the
-first-run **Generate & rebuild** flow (`psxrecomp/docs/LOCAL_CODEGEN_SDK.md`).
+Missing game `generated/` and/or BIOS backends (or `BPE_FORCE_SETUP=1`) opens
+the first-run **Generate & rebuild** flow. That step regenerates OpenBIOS
+(and optional SCPH1001 if you pick a dump) plus game C locally — CI never
+ships BIOS or game generated C.
 CI release zips are setup hosts (no game C); the same flow creates `generated/`
 locally then rebuilds. BPE leaves `[pgo] enabled = false`.

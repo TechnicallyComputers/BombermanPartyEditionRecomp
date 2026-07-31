@@ -243,6 +243,17 @@ static int resolve_build_paths(void) {
     return join_path(g_exe_path, sizeof(g_exe_path), g_build_dir, exe_name);
 }
 
+static int bios_backends_missing(void) {
+    char openbios[1100], scph[1100];
+    if (!join_path(openbios, sizeof(openbios), g_project_root,
+                   "psxrecomp/generated/OpenBIOS_dispatch.c"))
+        return 1;
+    if (!join_path(scph, sizeof(scph), g_project_root,
+                   "psxrecomp/generated/SCPH1001_dispatch.c"))
+        return 1;
+    return !(path_is_file(openbios) || path_is_file(scph));
+}
+
 int psxrecomp_codegen_host_sources_missing(
     const PsxrecompCodegenHostConfig* cfg) {
     if (!cfg || !cfg->cmake_target || !cfg->exe_basename)
@@ -256,7 +267,34 @@ int psxrecomp_codegen_host_sources_missing(
                    cfg_or(cfg->gen_marker_relpath,
                           "generated/SLUS_011.89_dispatch.c")))
         return 1;
-    return !path_is_file(marker);
+    if (!path_is_file(marker))
+        return 1;
+    return bios_backends_missing();
+}
+
+static int read_line_file(const char* path, char* out, size_t cap) {
+    FILE* f = fopen(path, "r");
+    if (!f) return 0;
+    if (!fgets(out, (int)cap, f)) {
+        fclose(f);
+        return 0;
+    }
+    fclose(f);
+    size_t n = strlen(out);
+    while (n && (out[n - 1] == '\n' || out[n - 1] == '\r'))
+        out[--n] = '\0';
+    return n > 0;
+}
+
+static int resolve_bios_arg(char* out, size_t cap) {
+    char cand[1100];
+    if (join_path(cand, sizeof(cand), g_project_root, "bios.cfg") &&
+        read_line_file(cand, out, cap) && path_is_file(out))
+        return 1;
+    if (read_line_file("bios.cfg", out, cap) && path_is_file(out))
+        return 1;
+    out[0] = '\0';
+    return 0;
 }
 
 static int json_get_string(const char* line, const char* key, char* out,
@@ -464,28 +502,44 @@ static int host_prepare_generate(const char* source_path, char* out_path,
     if (on_progress)
         on_progress(progress_ctx, 0.02f, "Starting psxrecomp generate…");
 
+    char bios_path[1100];
+    const int have_bios = resolve_bios_arg(bios_path, sizeof(bios_path));
+
 #if defined(_WIN32)
     char cmdline[4096];
-    snprintf(cmdline, sizeof(cmdline),
-             "\"%s\" \"%s\" generate --project-root \"%s\" --config \"%s\" "
-             "--disc \"%s\" --json-progress",
-             g_python, g_cli_path, g_project_root, g_game_toml, source_path);
+    if (have_bios) {
+        snprintf(cmdline, sizeof(cmdline),
+                 "\"%s\" \"%s\" generate --project-root \"%s\" --config \"%s\" "
+                 "--disc \"%s\" --bios \"%s\" --json-progress",
+                 g_python, g_cli_path, g_project_root, g_game_toml, source_path,
+                 bios_path);
+    } else {
+        snprintf(cmdline, sizeof(cmdline),
+                 "\"%s\" \"%s\" generate --project-root \"%s\" --config \"%s\" "
+                 "--disc \"%s\" --json-progress",
+                 g_python, g_cli_path, g_project_root, g_game_toml, source_path);
+    }
     if (!run_cli_win(cmdline, on_progress, progress_ctx, err_msg, err_cap,
                      "psxrecomp generate"))
         return 0;
 #else
-    char* argv[] = {
-        g_python,
-        g_cli_path,
-        "generate",
-        "--project-root",
-        g_project_root,
-        "--config",
-        g_game_toml,
-        "--disc",
-        (char*)source_path,
-        "--json-progress",
-        NULL};
+    char* argv[16];
+    int argc = 0;
+    argv[argc++] = g_python;
+    argv[argc++] = g_cli_path;
+    argv[argc++] = "generate";
+    argv[argc++] = "--project-root";
+    argv[argc++] = g_project_root;
+    argv[argc++] = "--config";
+    argv[argc++] = g_game_toml;
+    argv[argc++] = "--disc";
+    argv[argc++] = (char*)source_path;
+    if (have_bios) {
+        argv[argc++] = "--bios";
+        argv[argc++] = bios_path;
+    }
+    argv[argc++] = "--json-progress";
+    argv[argc] = NULL;
     if (!run_cli_posix(argv, on_progress, progress_ctx, err_msg, err_cap,
                        "psxrecomp generate"))
         return 0;
@@ -745,8 +799,8 @@ void psxrecomp_codegen_host_apply(RecompLauncherCGameInfo* gi,
     gi->prepare_with_progress = host_prepare_generate;
     gi->prepare_use_selected_rom = 1;
     /* Number prefix is applied in the setup UI (BIOS adds a step). */
-    gi->prepare_section_title = "Generate C sources & rebuild";
-    gi->prepare_busy_status = "Generating sources…";
+    gi->prepare_section_title = "Generate BIOS + game C & rebuild";
+    gi->prepare_busy_status = "Generating BIOS + game sources…";
     gi->prepare_success_status = "Sources ready — building…";
 
     const int can_rebuild = find_cmake(g_cmake, sizeof(g_cmake)) &&

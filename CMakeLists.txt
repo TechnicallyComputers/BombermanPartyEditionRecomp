@@ -71,13 +71,10 @@ if(NOT RECOMP_NET_ROOT AND EXISTS "${PSXRECOMP_ROOT}/lib/recomp-net/CMakeLists.t
         "Path to recomp-net; empty = auto-discover" FORCE)
 endif()
 
-include("${PSXRECOMP_ROOT}/runtime/runtime.cmake")
-
 # ---- Setup host vs full game ----
-# When generated/ is missing (fresh clone / CI setup zip), build a BIOS-only
-# runtime that still links the generate & rebuild UI (PSX_HAS_GAME_CODEGEN).
-# After the user runs Generate & rebuild, cmake reconfigure sees the marker and
-# links real game C into the same target name (psx-runtime).
+# When generated/ is missing (fresh clone / CI setup zip), build a launcher-only
+# host with no game C and no BIOS backends. First-run Generate & rebuild emits
+# BIOS + game C locally, then reconfigure links them into psx-runtime.
 option(BPE_FORCE_SETUP_HOST
     "Build without linking game C even if generated/ exists" OFF)
 option(BPE_REQUIRE_GAME_C
@@ -89,6 +86,13 @@ set(BPE_HAS_GAME_C FALSE)
 if(EXISTS "${BPE_GEN_MARKER}" AND NOT BPE_FORCE_SETUP_HOST)
     set(BPE_HAS_GAME_C TRUE)
 endif()
+
+if(NOT BPE_HAS_GAME_C)
+    set(PSXRECOMP_ALLOW_NO_BIOS ON CACHE BOOL
+        "Allow runtime with no BIOS backends (setup host)" FORCE)
+endif()
+
+include("${PSXRECOMP_ROOT}/runtime/runtime.cmake")
 
 if(BPE_REQUIRE_GAME_C AND NOT BPE_HAS_GAME_C)
     message(FATAL_ERROR
@@ -128,7 +132,8 @@ if(BPE_HAS_GAME_C)
     )
 else()
     message(STATUS
-        "BPE: setup host (no generated game C) — first-run Generate & rebuild")
+        "BPE: setup host (no game C, no BIOS backends) — "
+        "first-run Generate & rebuild")
     psxrecomp_add_runtime_target(psx-runtime
         ${BPE_RUNTIME_EXTRA_ARGS}
     )

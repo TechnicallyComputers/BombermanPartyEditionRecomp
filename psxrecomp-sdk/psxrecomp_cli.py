@@ -127,30 +127,94 @@ def resolve_cue_bin(cue_path: Path) -> Path:
     return cand
 
 
-def find_psxrecomp_game(project_root: Path) -> Path:
-    env = os.environ.get("PSXRECOMP_GAME", "").strip()
+def _find_recompiler_tool(project_root: Path, basename: str, env_name: str) -> Path:
+    env = os.environ.get(env_name, "").strip()
     if env:
         p = Path(env).expanduser()
         if p.is_file():
             return p.resolve()
-    candidates = [
-        project_root / "psxrecomp" / "recompiler" / "build" / "psxrecomp-game",
-        project_root / "psxrecomp" / "recompiler" / "build" / "psxrecomp-game.exe",
-        ROOT / "recompiler" / "build" / "psxrecomp-game",
-        ROOT / "recompiler" / "build" / "psxrecomp-game.exe",
+    names = [basename, f"{basename}.exe"]
+    search_dirs = [
+        project_root / "psxrecomp" / "recompiler" / "build",
+        project_root / "psxrecomp" / "recompiler" / "build" / "Release",
+        project_root / "build-recompiler",
+        ROOT / "recompiler" / "build",
+        ROOT / "recompiler" / "build" / "Release",
     ]
-    for c in candidates:
-        if c.is_file():
-            return c.resolve()
-    which = shutil.which("psxrecomp-game")
+    for d in search_dirs:
+        for name in names:
+            c = d / name
+            if c.is_file():
+                return c.resolve()
+    which = shutil.which(basename)
     if which:
         return Path(which).resolve()
     raise FileNotFoundError(
-        "psxrecomp-game not found. Build it:\n"
+        f"{basename} not found. Build it:\n"
         "  cmake -S psxrecomp/recompiler -B psxrecomp/recompiler/build -G Ninja\n"
-        "  cmake --build psxrecomp/recompiler/build --target psxrecomp-game\n"
-        "Or set PSXRECOMP_GAME=/path/to/psxrecomp-game"
+        f"  cmake --build psxrecomp/recompiler/build --target {basename}\n"
+        f"Or set {env_name}=/path/to/{basename}"
     )
+
+
+def find_psxrecomp_game(project_root: Path) -> Path:
+    return _find_recompiler_tool(project_root, "psxrecomp-game", "PSXRECOMP_GAME")
+
+
+def find_psxrecomp_bios(project_root: Path) -> Path:
+    return _find_recompiler_tool(project_root, "psxrecomp-bios", "PSXRECOMP_BIOS")
+
+
+def framework_root(project_root: Path) -> Path:
+    """Directory containing bios/*.toml and recompiler/ (usually …/psxrecomp)."""
+    cand = project_root / "psxrecomp"
+    if (cand / "bios").is_dir() and (cand / "recompiler").is_dir():
+        return cand
+    if (ROOT / "bios").is_dir() and (ROOT / "recompiler").is_dir():
+        return ROOT
+    return cand
+
+
+def bios_backend_present(fw: Path, stem: str) -> bool:
+    dispatch = fw / "generated" / f"{stem}_dispatch.c"
+    full = fw / "generated" / f"{stem}_full.c"
+    if not dispatch.is_file() or not full.is_file():
+        return False
+    try:
+        text = dispatch.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return False
+    return f"{stem}_psx_bios_backend" in text
+
+
+def regen_bios_profile(
+    project_root: Path,
+    profile_rel: str,
+    *,
+    progress: ProgressReporter,
+) -> None:
+    fw = framework_root(project_root)
+    profile = fw / profile_rel
+    if not profile.is_file():
+        raise FileNotFoundError(f"BIOS profile not found: {profile}")
+    bios_tool = find_psxrecomp_bios(project_root)
+    progress.log(f"regen BIOS via {bios_tool.name} --config {profile_rel}")
+    proc = subprocess.run(
+        [str(bios_tool), "--config", str(profile)],
+        cwd=str(fw),
+        capture_output=True,
+        text=True,
+    )
+    for stream in (proc.stdout, proc.stderr):
+        if not stream:
+            continue
+        for line in stream.splitlines():
+            if line.strip():
+                progress.log(line)
+    if proc.returncode != 0:
+        raise RuntimeError(
+            f"psxrecomp-bios failed for {profile_rel} (exit {proc.returncode})"
+        )
 
 
 def load_sections(config: Path) -> dict[str, dict[str, Any]]:
@@ -283,6 +347,8 @@ def cmd_generate(args: argparse.Namespace, progress: ProgressReporter) -> int:
     game = secs.get("game") or {}
     prep = secs.get("prepare_disc") or {}
     recomp = secs.get("recompiler") or {}
+    runtime = secs.get("runtime") or {}
+    openbios_allowed = bool(runtime.get("openbios", True))
 
     disc_arg = args.disc
     if not disc_arg:
@@ -324,6 +390,53 @@ def cmd_generate(args: argparse.Namespace, progress: ProgressReporter) -> int:
     if not boot_path.is_file():
         progress.error(f"boot EXE missing after prepare: {boot_path}", code=EXIT_ERROR)
         return EXIT_ERROR
+
+    # ---- BIOS backends (local only; CI ships none) ----
+    fw = framework_root(project_root)
+    bios_arg = (getattr(args, "bios", None) or "").strip()
+    if bios_arg:
+        bios_path = Path(bios_arg).expanduser()
+        if not bios_path.is_absolute():
+            bios_path = (project_root / bios_path).resolve()
+        else:
+            bios_path = bios_path.resolve()
+        if not bios_path.is_file():
+            progress.error(f"BIOS not found: {bios_path}", code=EXIT_USAGE)
+            return EXIT_USAGE
+        dest = fw / "bios" / "SCPH1001.BIN"
+        progress.phase("bios", pct=0.15, message="Staging retail BIOS dump…")
+        try:
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            if dest.resolve() != bios_path.resolve():
+                shutil.copy2(bios_path, dest)
+        except OSError as exc:
+            progress.error(f"failed to stage BIOS: {exc}", code=EXIT_ERROR)
+            return EXIT_ERROR
+        try:
+            progress.phase("bios", pct=0.2, message="Generating SCPH1001 BIOS C…")
+            regen_bios_profile(project_root, "bios/SCPH1001.toml", progress=progress)
+        except Exception as exc:  # noqa: BLE001
+            progress.error(str(exc), code=EXIT_ERROR)
+            return EXIT_ERROR
+    elif not openbios_allowed and not bios_backend_present(fw, "SCPH1001"):
+        progress.error(
+            "This title requires a retail BIOS dump. Pass --bios SCPH1001.BIN "
+            "(or pick one in the setup wizard).",
+            code=EXIT_USAGE,
+        )
+        return EXIT_USAGE
+
+    if openbios_allowed and (
+        args.force_bios or not bios_backend_present(fw, "OpenBIOS")
+    ):
+        try:
+            progress.phase(
+                "bios", pct=0.25, message="Generating OpenBIOS backend C…"
+            )
+            regen_bios_profile(project_root, "bios/OpenBIOS.toml", progress=progress)
+        except Exception as exc:  # noqa: BLE001
+            progress.error(str(exc), code=EXIT_ERROR)
+            return EXIT_ERROR
 
     try:
         game_tool = find_psxrecomp_game(project_root)
@@ -644,6 +757,9 @@ def cmd_rebuild(args: argparse.Namespace, progress: ProgressReporter) -> int:
     cmake_extra = []
     if args.cmake_extra:
         cmake_extra.extend(args.cmake_extra)
+    # Full playable link after local generate (not the CI setup-host shape).
+    cmake_extra.append("-DBPE_FORCE_SETUP_HOST=OFF")
+    cmake_extra.append("-DPSXRECOMP_ALLOW_NO_BIOS=OFF")
 
     # mute_host_audio / hide_video: default ON; game.toml / CLI can disable.
     mute_host = True
@@ -749,9 +865,21 @@ def build_parser() -> argparse.ArgumentParser:
     v.add_argument("--skip-hash-check", action="store_true")
     v.set_defaults(handler=cmd_verify_disc)
 
-    g = sub.add_parser("generate", help="prepare disc + generate C")
+    g = sub.add_parser(
+        "generate", help="regen BIOS backends + prepare disc + generate game C"
+    )
     add_common(g)
     g.add_argument("--disc", default="", help="source dump or working cue/bin")
+    g.add_argument(
+        "--bios",
+        default="",
+        help="optional retail BIOS dump (staged as bios/SCPH1001.BIN + regen)",
+    )
+    g.add_argument(
+        "--force-bios",
+        action="store_true",
+        help="regenerate OpenBIOS even if generated/ backends already exist",
+    )
     g.add_argument("--skip-hash-check", action="store_true")
     g.add_argument("--force-prepare", action="store_true")
     g.add_argument("--gen-marker", default="", help="expected marker under out_dir")

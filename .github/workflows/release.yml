@@ -1,13 +1,9 @@
 # Build BPE setup-host packages for Linux, Windows, macOS (arm64 + Intel).
-# Ships a GUI generate & rebuild host + sources + psxrecomp-game — not game C,
-# BIOS, or disc images. Users supply a legal disc; first-run builds playable
-# binary locally (see psxrecomp/docs/LOCAL_CODEGEN_SDK.md).
+# Ships a GUI generate & rebuild host + sources + psxrecomp-game/bios tools —
+# not game C, not BIOS backends, not disc images. First-run Generate emits
+# OpenBIOS (+ optional SCPH1001) and game C locally, then rebuilds.
 #
-# Requires:
-#   - Secret CI_ASSETS_TOKEN: fine-grained PAT with Contents:Read on
-#     TechnicallyComputers/psxrecomp-ci-assets (private). That repo supplies
-#     SCPH1001.BIN (Git LFS) for BIOS regen on the runner (OpenBIOS + retail
-#     link-time BIOS C). Players still pick BIOS + disc at first launch.
+# No private CI assets. No BIOS dumps. No generated/ required.
 #
 # Framework deps use this repository's exact gitlink pins:
 #   - psxrecomp at the game root (which owns its recomp-net pin)
@@ -81,44 +77,12 @@ jobs:
           echo "recomp-ui=$(git -C recomp-ui rev-parse --short HEAD)"
           echo "recomp-net=$(git -C psxrecomp/lib/recomp-net rev-parse --short HEAD)"
 
-      # Windows runners ship Git LFS; install only where apt/brew is needed.
-      # Use bash (not MSYS2) so this runs before setup-msys2.
-      - name: Install git-lfs (Linux)
-        if: runner.os == 'Linux'
+      - name: Setup host mode (no game C, no BIOS backends)
         shell: bash
         run: |
           set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends git-lfs
-          git lfs install
-
-      - name: Install git-lfs (macOS)
-        if: runner.os == 'macOS'
-        shell: bash
-        run: |
-          set -euo pipefail
-          brew install git-lfs
-          git lfs install
-
-      - name: Fetch CI assets (private, LFS)
-        uses: actions/checkout@v4
-        with:
-          repository: TechnicallyComputers/psxrecomp-ci-assets
-          token: ${{ secrets.CI_ASSETS_TOKEN }}
-          path: _ci-assets
-          fetch-depth: 1
-          lfs: true
-
-      - name: Setup host mode (no game generated C required)
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [[ -f generated/SLUS_011.89_dispatch.c ]]; then
-            echo "Note: generated/ is present; CI still builds a setup zip."
-            echo "Force setup-only link with -DBPE_FORCE_SETUP_HOST=ON."
-          else
-            echo "generated/ absent — configuring setup host (expected)."
-          fi
+          rm -rf generated psxrecomp/generated
+          echo "Cleared any generated/ trees — CI builds a BIOS-free setup host."
 
       - name: Setup MSYS2 (Windows)
         if: runner.os == 'Windows'
@@ -138,9 +102,6 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          # libsdl2-dev: still useful for headers/tooling; runtime defaults to
-          # SDL3 via FetchContent. libxtst-dev is required when building the
-          # fetched SDL3 (SDL_X11_XTEST); libsdl2-dev does not pull it in.
           sudo apt-get install -y --no-install-recommends \
             build-essential cmake ninja-build pkg-config \
             libsdl2-dev libgl1-mesa-dev libxtst-dev \
@@ -151,87 +112,31 @@ jobs:
       - name: Install deps (macOS)
         if: runner.os == 'macOS'
         run: |
-          # Prefer system SDL3 when available; FetchContent covers older brew.
           brew install cmake ninja pkg-config sdl3 || brew install cmake ninja pkg-config sdl2
-          # zip is preinstalled; llvm-profdata via xcrun / Xcode CLT
 
-      # Current psxrecomp requires <stem>_psx_bios_backend in generated dispatch.
-      # The SCPH1001.zip in ci-assets is pre-descriptor; regenerate on the runner.
-      # Use matrix shell (msys2 on Windows) — Git Bash cannot load MinGW DLLs for
-      # psxrecomp-bios.exe (exit 127 right after "emit-full").
-      - name: Regenerate BIOS C (OpenBIOS + SCPH1001)
+      - name: Build recompiler tools (game + bios emitters)
         run: |
           set -euo pipefail
           JOBS="$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)"
-          # MinGW runtime DLLs for the just-built psxrecomp-bios[.exe]
           if [[ -d /mingw64/bin ]]; then
             export PATH="/mingw64/bin:${PATH}"
           fi
-
-          BIOS_SRC=''
-          for cand in \
-              '_ci-assets/SCPH1001.BIN' \
-              '_ci-assets/SCPH1001.bin' \
-              '_ci-assets/bios/SCPH1001.BIN' \
-              '_ci-assets/bios/SCPH1001.bin'; do
-            if [[ -f "$cand" ]]; then BIOS_SRC="$cand"; break; fi
-          done
-          if [[ -z "${BIOS_SRC}" ]]; then
-            echo "::error::SCPH1001.BIN missing under _ci-assets (need dump for retail BIOS regen)"
-            find _ci-assets -maxdepth 2 -type f | head -40
-            exit 1
-          fi
-          BIOS_SZ="$(wc -c < "${BIOS_SRC}" | tr -d '[:space:]')"
-          if [[ "${BIOS_SZ}" -lt 500000 || "${BIOS_SZ}" -gt 600000 ]]; then
-            echo "::error::BIOS size ${BIOS_SZ} looks wrong (want ~512 KiB)"
-            exit 1
-          fi
-          mkdir -p psxrecomp/bios
-          cp -f "${BIOS_SRC}" psxrecomp/bios/SCPH1001.BIN
-
           cmake -S psxrecomp/recompiler -B build-recompiler -G Ninja \
             -DCMAKE_BUILD_TYPE=Release
           cmake --build build-recompiler \
-            --target psxrecomp-bios psxrecomp-game -j"${JOBS}"
-
-          # MSYS sees PE files without +x; chmod so bash can exec them.
+            --target psxrecomp-game psxrecomp-bios -j"${JOBS}"
           for bin in psxrecomp-bios psxrecomp-game; do
             if [[ -f "build-recompiler/${bin}.exe" ]]; then
               chmod +x "build-recompiler/${bin}.exe"
             elif [[ -f "build-recompiler/${bin}" ]]; then
               chmod +x "build-recompiler/${bin}"
-            fi
-          done
-          if [[ ! -f build-recompiler/psxrecomp-game && \
-                ! -f build-recompiler/psxrecomp-game.exe ]]; then
-            echo "::error::psxrecomp-game missing after recompiler build"
-            exit 1
-          fi
-
-          (
-            cd psxrecomp
-            export PSXRECOMP_BIOS_BUILD="${PWD}/../build-recompiler"
-            bash tools/regen_bios.sh --config bios/OpenBIOS.toml
-            bash tools/regen_bios.sh --config bios/SCPH1001.toml
-          )
-
-          for stem in OpenBIOS SCPH1001; do
-            for f in "psxrecomp/generated/${stem}_full.c" \
-                     "psxrecomp/generated/${stem}_dispatch.c"; do
-              if [[ ! -f "$f" ]]; then
-                echo "::error::missing $f after regen_bios"
-                exit 1
-              fi
-            done
-            if ! grep -q "${stem}_psx_bios_backend" \
-                "psxrecomp/generated/${stem}_dispatch.c"; then
-              echo "::error::${stem}_dispatch.c lacks ${stem}_psx_bios_backend descriptor"
+            else
+              echo "::error::${bin} missing after recompiler build"
               exit 1
             fi
-            echo "BIOS ${stem}: OK ($(wc -c < "psxrecomp/generated/${stem}_full.c") bytes)"
           done
 
-      - name: Configure & build setup host (Release, no game C link)
+      - name: Configure & build setup host (no game C, no BIOS backends)
         env:
           CMAKE_OSX_DEPLOYMENT_TARGET: ${{ matrix.deployment_target || '' }}
         run: |
@@ -242,16 +147,16 @@ jobs:
             EXTRA+=("-DCMAKE_OSX_DEPLOYMENT_TARGET=${CMAKE_OSX_DEPLOYMENT_TARGET}")
           fi
           JOBS="$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)"
-          # BPE_FORCE_SETUP_HOST: never link committed generated/ into the CI zip.
           cmake -S . -B build-ci -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DRNET_ENABLE_ICE=ON \
             -DBPE_FORCE_SETUP_HOST=ON \
+            -DPSXRECOMP_ALLOW_NO_BIOS=ON \
             -DPSX_GAME_VERSION="${VERSION}" \
             "${EXTRA[@]}"
           cmake --build build-ci --target psx-runtime -j"${JOBS}"
 
-      - name: Package setup zip (sources + tools + host)
+      - name: Package setup zip + tools pack
         run: |
           set -euo pipefail
           chmod +x scripts/package_setup_release.sh
@@ -259,12 +164,15 @@ jobs:
           if [[ "${{ runner.os }}" == "Windows" ]]; then
             export BPE_RUNTIME_BIN_DIR=/mingw64/bin
           fi
-          # Do not embed toolchains — fetch via RetComM / retcomm-toolchains.
           scripts/package_setup_release.sh build-ci "${{ matrix.artifact }}" build-recompiler
-          # Overlay vendored SDK surface, then pack cli + psxrecomp-game.
+          # Overlay vendored SDK surface, then pack cli + emitters.
           cp -a psxrecomp-sdk/. psxrecomp/
           mkdir -p psxrecomp/recompiler/build
-          for cand in build-recompiler/psxrecomp-game build-recompiler/psxrecomp-game.exe; do
+          for cand in \
+              build-recompiler/psxrecomp-game \
+              build-recompiler/psxrecomp-game.exe \
+              build-recompiler/psxrecomp-bios \
+              build-recompiler/psxrecomp-bios.exe; do
             if [[ -f "$cand" ]]; then
               cp -a "$cand" "psxrecomp/recompiler/build/$(basename "$cand")"
             fi

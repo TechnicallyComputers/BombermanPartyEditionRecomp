@@ -7,19 +7,20 @@ automation. This does **not** redistribute disc images.
 PGO (optional) runs **only on the user’s machine** during local rebuild when
 `game.toml` has `[pgo] enabled = true`. CI must not set `PSX_PGO`.
 
-## Setup host (CI without `generated/`)
+## Setup host (CI without game/BIOS generated C)
 
-Games can ship a **setup host**: the normal `psx-runtime` target linked
-**without** `GAME_GENERATED_*` (BIOS-only / no game dispatch), plus
-`PSX_HAS_GAME_CODEGEN` and `host/psxrecomp_codegen_host.c`. CI builds this when
-game `generated/` is absent; the first-run UI runs `generate` → `rebuild`, which
-reconfigures cmake so the same target then links real game C.
+Games can ship a **setup host**: `psx-runtime` linked **without** game C and
+**without** BIOS backends (`-DBPE_FORCE_SETUP_HOST=ON` /
+`-DPSXRECOMP_ALLOW_NO_BIOS=ON`), plus `PSX_HAS_GAME_CODEGEN` and the codegen
+host. CI never needs BIOS dumps or private assets. First-run Generate emits
+OpenBIOS (from bundled `openbios.bin`) and optional SCPH1001 (player dump),
+then game C, then rebuild links everything.
 
 | Piece | Role |
 |-------|------|
 | Setup exe | `recomp-ui` + codegen host; opens Generate & rebuild |
-| `psxrecomp-tools` pack | `psxrecomp_cli.py`, `tools/`, prebuilt `psxrecomp-game` (`scripts/package_psxrecomp_tools.sh`) |
-| Toolchain pack | `bin/cmake` (+ ninja/compiler); smoke: `scripts/package_toolchain_smoke_linux.sh` |
+| `psxrecomp-tools` pack | `psxrecomp_cli.py`, `tools/`, `psxrecomp-game` + `psxrecomp-bios` |
+| Toolchain pack | RetComM `cmake-clang-v1` (not embedded in game zips) |
 | Game sources | `game.toml`, seeds, `CMakeLists.txt`, `psxrecomp/`, `recomp-ui/` |
 
 RetComM can drive the same CLI without the ImGui host. Direct-download zips
@@ -34,6 +35,7 @@ python psxrecomp/psxrecomp_cli.py verify-disc \
 
 python psxrecomp/psxrecomp_cli.py generate \
   --config game.toml --project-root . --disc path/to/dump.iso \
+  [--bios path/to/SCPH1001.BIN] [--force-bios] \
   [--skip-hash-check] [--force-prepare] [--json-progress]
 
 python psxrecomp/psxrecomp_cli.py rebuild \

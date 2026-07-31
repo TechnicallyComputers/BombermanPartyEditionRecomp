@@ -18,15 +18,16 @@ static const PsxrecompCodegenHostConfig kBpeCodegenConfig = {
     .exe_basename = "Bomberman_Party_Edition_Recompiled",
     .prepare_note =
         "Uses your Bomberman Party Edition (USA) disc with the local "
-        "psxrecomp SDK to regenerate generated/, then runs cmake --build "
-        "and restarts. You must legally own this disc.",
+        "psxrecomp SDK to generate OpenBIOS (+ optional SCPH1001) and "
+        "game C, then cmake --build and restart. You must legally own "
+        "this disc.",
     .prepare_note_windows =
-        "Uses your disc with the local psxrecomp SDK to regenerate "
-        "generated/, then quits and rebuilds via a helper so the running "
+        "Uses your disc with the local psxrecomp SDK to generate BIOS + "
+        "game C, then quits and rebuilds via a helper so the running "
         ".exe is not locked. You must legally own this disc.",
     .prepare_note_no_cmake =
-        "Uses your disc with the local psxrecomp SDK to regenerate "
-        "generated/. CMake/build dir not found — rebuild manually, then "
+        "Uses your disc with the local psxrecomp SDK to generate BIOS + "
+        "game C. CMake/build dir not found — rebuild manually, then "
         "relaunch.",
 };
 
