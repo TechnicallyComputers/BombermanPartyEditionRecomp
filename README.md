@@ -92,16 +92,18 @@ Repack: `bash scripts/package_release.sh build-mingw-netplay windows-x64-mingw`
 
 ### Setup host / local generate / rebuild
 
-Configure without `generated/` (or `-DBPE_FORCE_SETUP_HOST=ON`) to build a
-BIOS-only **setup host** with the Generate & rebuild UI. After generate,
-reconfigure+build links real game C into the same `psx-runtime` target.
+Configure without game/BIOS `generated/` (or `-DBPE_FORCE_SETUP_HOST=ON`
+`-DPSXRECOMP_ALLOW_NO_BIOS=ON`) to build a **setup host** with the Generate &
+rebuild UI and no linked BIOS backends. First-run generate emits OpenBIOS
+(+ optional SCPH1001) and game C locally, then rebuild links them.
 
-Release zips use `scripts/package_setup_release.sh` (sources + `psxrecomp-game`
-+ optional `toolchain/`). Tool packs: `scripts/package_psxrecomp_tools.sh` (SDK surface in `psxrecomp-sdk/`).
+Release zips use `scripts/package_setup_release.sh`. Tool packs
+(`scripts/package_psxrecomp_tools.sh`) ship `psxrecomp-game` + `psxrecomp-bios`
+from `psxrecomp-sdk/`. CI has no BIOS dump / private-asset dependency.
 
-When `generated/` is missing (or `BPE_FORCE_SETUP=1`), the launcher offers
-**Generate & rebuild** via `psxrecomp/psxrecomp_cli.py` (see
-`psxrecomp/docs/LOCAL_CODEGEN_SDK.md`). BPE ships with `[pgo] enabled = false`
+When sources are missing (or `BPE_FORCE_SETUP=1`), the launcher offers
+**Generate & rebuild** via `psxrecomp_cli.py` (see
+`psxrecomp-sdk/docs/LOCAL_CODEGEN_SDK.md`). BPE ships with `[pgo] enabled = false`
 — plain Release is enough; setup does not run a PGO train.
 
 ```bash
