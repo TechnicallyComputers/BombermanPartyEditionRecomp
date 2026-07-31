@@ -149,7 +149,6 @@ jobs:
           JOBS="$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)"
           cmake -S . -B build-ci -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
-            -DRNET_ENABLE_ICE=ON \
             -DBPE_FORCE_SETUP_HOST=ON \
             -DPSXRECOMP_ALLOW_NO_BIOS=ON \
             -DPSX_GAME_VERSION="${VERSION}" \

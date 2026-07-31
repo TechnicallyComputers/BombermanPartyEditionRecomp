@@ -140,8 +140,10 @@ else()
 endif()
 
 target_compile_definitions(psx-runtime PRIVATE PSX_HAS_GAME_CODEGEN=1)
+# Do NOT add CMAKE_CURRENT_SOURCE_DIR to -I: on case-insensitive macOS that
+# makes #include <version> pick up the repo VERSION pin file (0.1.0) and
+# explode libc++. codegen_setup.* live next to their sources; host/ is enough.
 target_include_directories(psx-runtime PRIVATE
-    "${CMAKE_CURRENT_SOURCE_DIR}"
     "${CMAKE_CURRENT_SOURCE_DIR}/host"
     "${RECOMP_UI_ROOT}/src"
 )
