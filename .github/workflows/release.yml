@@ -178,11 +178,6 @@ jobs:
             "${EXTRA[@]}"
           cmake --build build-ci --target psx-runtime -j"${JOBS}"
 
-      - name: Fetch portable toolchain pack
-        uses: ./psxrecomp/.github/actions/fetch-toolchain
-        with:
-          artifact: ${{ matrix.artifact }}
-
       - name: Package setup zip
         run: |
           set -euo pipefail
@@ -191,12 +186,8 @@ jobs:
             export BPE_RUNTIME_BIN_DIR=/mingw64/bin
           fi
           export BPE_RELEASE_VERSION
-          # Title packager stages host + sources, then calls
-          # psxrecomp/tools/stage_setup_sdk.sh for emitters/toolchain/DLLs.
-          if [[ -z "${PSXRECOMP_TOOLCHAIN_DIR:-${TOOLCHAIN_DIR:-${BPE_TOOLCHAIN_DIR:-}}}" ]]; then
-            echo "::error::toolchain dir not set — fetch-toolchain step failed?"
-            exit 1
-          fi
+          # Lean zip: emitters + sources only. Toolchain is downloaded by
+          # RetComM / the setup wizard (or provided as an offline zip).
           scripts/package_setup_release.sh build-ci "${{ matrix.artifact }}" build-recompiler
           ls -la dist/
 
