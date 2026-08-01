@@ -66,9 +66,16 @@ set(RECOMP_UI_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/recomp-ui" CACHE PATH
     "Path to recomp-ui launcher" FORCE)
 
 # Prefer the framework-vendored recomp-net submodule (CI recursive checkout).
-if(NOT RECOMP_NET_ROOT AND EXISTS "${PSXRECOMP_ROOT}/lib/recomp-net/CMakeLists.txt")
-    set(RECOMP_NET_ROOT "${PSXRECOMP_ROOT}/lib/recomp-net" CACHE PATH
-        "Path to recomp-net; empty = auto-discover" FORCE)
+# Multiplayer title: opt into PSX_NETPLAY when the submodule is present
+# (runtime.cmake defaults OFF). Override with -DPSX_NETPLAY=OFF.
+if(EXISTS "${PSXRECOMP_ROOT}/lib/recomp-net/CMakeLists.txt")
+    if(NOT RECOMP_NET_ROOT)
+        set(RECOMP_NET_ROOT "${PSXRECOMP_ROOT}/lib/recomp-net" CACHE PATH
+            "Path to recomp-net; empty = auto-discover" FORCE)
+    endif()
+    if(NOT DEFINED PSX_NETPLAY)
+        set(PSX_NETPLAY ON)
+    endif()
 endif()
 
 # ---- Setup host vs full game ----
@@ -115,7 +122,9 @@ set(BPE_RUNTIME_EXTRA_ARGS
 
 if(BPE_HAS_GAME_C)
     message(STATUS "BPE: linking generated game C (full runtime)")
-    file(GLOB BPE_GENERATED_FULL_SHARDS CONFIGURE_DEPENDS
+    # No CONFIGURE_DEPENDS: rebuild always reconfigures after generate, and
+    # CONFIGURE_DEPENDS + release-zip clock skew can make Ninja loop forever.
+    file(GLOB BPE_GENERATED_FULL_SHARDS
         "${CMAKE_CURRENT_SOURCE_DIR}/generated/SLUS_011.89_full_*.c")
     if(BPE_GENERATED_FULL_SHARDS)
         set(BPE_GENERATED_FULL "${BPE_GENERATED_FULL_SHARDS}")

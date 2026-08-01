@@ -97,9 +97,9 @@ Configure without game/BIOS `generated/` (or `-DBPE_FORCE_SETUP_HOST=ON`
 rebuild UI and no linked BIOS backends. First-run generate emits OpenBIOS
 (+ optional SCPH1001) and game C locally, then rebuild links them.
 
-Release zips use `scripts/package_setup_release.sh`. Tool packs
-(`scripts/package_psxrecomp_tools.sh`) ship `psxrecomp-game` + `psxrecomp-bios`
-from `psxrecomp-sdk/`. CI has no BIOS dump / private-asset dependency.
+Release zips use `scripts/package_setup_release.sh` and embed
+`psxrecomp-game` + `psxrecomp-bios` (plus the CLI) inside `psxrecomp/`.
+CI has no BIOS dump / private-asset dependency.
 
 When sources are missing (or `BPE_FORCE_SETUP=1`), the launcher offers
 **Generate & rebuild** via `psxrecomp_cli.py` (see

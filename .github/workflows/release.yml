@@ -203,11 +203,10 @@ jobs:
             "${EXTRA[@]}"
           cmake --build build-ci --target psx-runtime -j"${JOBS}"
 
-      - name: Package setup zip + tools pack
+      - name: Package setup zip
         run: |
           set -euo pipefail
           chmod +x scripts/package_setup_release.sh
-          chmod +x scripts/package_psxrecomp_tools.sh
           if [[ "${{ runner.os }}" == "Windows" ]]; then
             export BPE_RUNTIME_BIN_DIR=/mingw64/bin
           fi
@@ -226,17 +225,13 @@ jobs:
             fi
           done
           scripts/package_setup_release.sh build-ci "${{ matrix.artifact }}" build-recompiler
-          # Optional slim tools zip (shared-cache fallback); game zip is enough.
-          scripts/package_psxrecomp_tools.sh psxrecomp "${{ matrix.artifact }}" dist
           ls -la dist/
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: bpe-${{ matrix.artifact }}
-          path: |
-            dist/bpe-*-${{ matrix.artifact }}.zip
-            dist/psxrecomp-tools-${{ matrix.artifact }}.zip
+          path: dist/bpe-*-${{ matrix.artifact }}.zip
           if-no-files-found: error
           retention-days: 30
 
@@ -261,8 +256,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
-          find artifacts -type f \( -name 'bpe-*.zip' -o -name 'psxrecomp-tools-*.zip' \) \
-            -exec cp -v {} dist/ \;
+          find artifacts -type f -name 'bpe-*.zip' -exec cp -v {} dist/ \;
           ls -la dist/
 
       - name: Ensure release tag exists
@@ -292,7 +286,6 @@ jobs:
           name: Bomberman Party Edition ${{ needs.prepare.outputs.tag }}
           files: |
             dist/bpe-*.zip
-            dist/psxrecomp-tools-*.zip
           generate_release_notes: true
           fail_on_unmatched_files: true
           target_commitish: ${{ github.sha }}

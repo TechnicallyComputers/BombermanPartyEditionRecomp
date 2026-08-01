@@ -19,13 +19,13 @@ then game C, then rebuild links everything.
 | Piece | Role |
 |-------|------|
 | Setup exe | `recomp-ui` + codegen host; opens Generate & rebuild |
-| `psxrecomp-tools` pack | `psxrecomp_cli.py`, `tools/`, `psxrecomp-game` + `psxrecomp-bios` |
-| Toolchain pack | RetComM `cmake-clang-v1` (not embedded in game zips) |
+| Game zip `psxrecomp/` | `psxrecomp_cli.py`, `tools/`, `psxrecomp-game` + `psxrecomp-bios` |
+| Toolchain pack | RetComM `cmake-clang-v1` (optional under `toolchain/` in game zips) |
 | Game sources | `game.toml`, seeds, `CMakeLists.txt`, `psxrecomp/`, `recomp-ui/` |
 
-RetComM can drive the same CLI without the ImGui host. Direct-download zips
-should embed tools + a real (or smoke) toolchain under `toolchain/` and document
-Python 3.
+RetComM harvests emitters from the game zip into a shared SDK cache (no
+separate tools zip). Direct-download zips are wizard-complete; document
+Python 3 and cmake/toolchain on PATH (or bundled `toolchain/`).
 
 ## Commands
 

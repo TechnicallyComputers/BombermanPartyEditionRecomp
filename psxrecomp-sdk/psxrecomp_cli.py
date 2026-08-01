@@ -33,6 +33,69 @@ EXIT_USAGE = 2
 EXIT_VERIFY = 3
 
 
+def clamp_future_mtimes(
+    root: Path,
+    *,
+    skip: Optional[Path] = None,
+    now: Optional[float] = None,
+) -> int:
+    """Clamp mtimes ahead of *now* so Ninja does not infinite-reconfigure.
+
+    Release zips often preserve CI clocks that are slightly ahead of a user's
+    clock (timezone / skew). Ninja then treats every source as newer than
+    ``build.ninja``, re-runs CMake forever, and fails with
+    ``manifest 'build.ninja' still dirty after 100 tries``.
+    """
+    if not root.is_dir():
+        return 0
+    stamp = time.time() if now is None else now
+    skip_res: Optional[Path] = None
+    if skip is not None:
+        try:
+            skip_res = skip.resolve()
+        except OSError:
+            skip_res = skip
+    n = 0
+    for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+        dpath = Path(dirpath)
+        try:
+            d_res = dpath.resolve()
+        except OSError:
+            d_res = dpath
+        # Skip the active build tree entirely (outputs are rewritten anyway).
+        if skip_res is not None and (
+            d_res == skip_res or skip_res in d_res.parents
+        ):
+            dirnames[:] = []
+            continue
+        # Never descend into VCS metadata; prune the build dir at the parent.
+        pruned: list[str] = []
+        for x in dirnames:
+            if x == ".git":
+                continue
+            if skip_res is not None:
+                try:
+                    if (dpath / x).resolve() == skip_res:
+                        continue
+                except OSError:
+                    pass
+            pruned.append(x)
+        dirnames[:] = pruned
+        for name in filenames:
+            p = dpath / name
+            try:
+                mtime = p.stat().st_mtime
+            except OSError:
+                continue
+            if mtime > stamp:
+                try:
+                    os.utime(p, (stamp, stamp), follow_symlinks=False)
+                    n += 1
+                except OSError:
+                    pass
+    return n
+
+
 def _parse_array_items(inner: str) -> list[Any]:
     items: list[Any] = []
     if not inner.strip():
@@ -561,18 +624,22 @@ def _cmake_configure(
     progress: ProgressReporter,
 ) -> None:
     build_dir.mkdir(parents=True, exist_ok=True)
+    # Prefer Ninja when available; fall back so hosts without ninja still build.
+    if not (build_dir / "CMakeCache.txt").is_file() and shutil.which("ninja"):
+        gen = ["-G", "Ninja"]
+    else:
+        gen = []
     cmd = [
         "cmake",
         "-S",
         str(project_root),
         "-B",
         str(build_dir),
+        *gen,
+        "-DCMAKE_BUILD_TYPE=Release",
+        f"-DPSX_PGO={pgo}",
+        *extra,
     ]
-    # Only force generator on fresh trees (avoid clash with existing cache).
-    if not (build_dir / "CMakeCache.txt").is_file():
-        cmd.extend(["-G", "Ninja"])
-    cmd.append(f"-DPSX_PGO={pgo}")
-    cmd.extend(extra)
     progress.log(" ".join(cmd))
     proc = subprocess.run(cmd, cwd=str(project_root), capture_output=True, text=True)
     for stream in (proc.stdout, proc.stderr):
@@ -609,7 +676,17 @@ def _cmake_build(
                 if line.strip():
                     progress.log(line)
     if proc.returncode != 0:
-        raise RuntimeError(f"cmake --build failed (exit {proc.returncode})")
+        err = f"cmake --build failed (exit {proc.returncode})"
+        combined = "\n".join(
+            s for s in (proc.stdout or "", proc.stderr or "") if s
+        )
+        if "still dirty after" in combined:
+            err += (
+                " — Ninja reconfigure loop (often release-zip mtimes ahead of "
+                "the system clock). Re-run after the CLI clamps future mtimes, "
+                "or touch the project tree / fix the clock."
+            )
+        raise RuntimeError(err)
 
 
 def _soft_stop(pid: int, timeout: int = 30) -> None:
@@ -822,6 +899,13 @@ def cmd_rebuild(args: argparse.Namespace, progress: ProgressReporter) -> int:
     # Full playable link after local generate (not the CI setup-host shape).
     cmake_extra.append("-DBPE_FORCE_SETUP_HOST=OFF")
     cmake_extra.append("-DPSXRECOMP_ALLOW_NO_BIOS=OFF")
+
+    clamped = clamp_future_mtimes(project_root, skip=build_dir)
+    if clamped:
+        progress.log(
+            f"Clamped {clamped} future mtime(s) under {project_root} "
+            "(avoids Ninja dirty-manifest loop from release-zip clocks)."
+        )
 
     # mute_host_audio / hide_video: default ON; game.toml / CLI can disable.
     mute_host = True

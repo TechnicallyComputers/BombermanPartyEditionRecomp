@@ -275,7 +275,8 @@ Bomberman Party Edition Recompiled ${VERSION} — setup package
 Platform: ${ARTIFACT_TAG}
 
 One zip for first install and updates. Does NOT include disc images, retail
-BIOS dumps, or pre-generated game C.
+BIOS dumps, or pre-generated game C. Emitters (psxrecomp-game / psxrecomp-bios)
+and the CLI are already inside psxrecomp/.
 
 Standalone:
 1. Install Python 3.
@@ -290,6 +291,10 @@ RetComM uses this same zip: it promotes tools into a shared SDK cache,
 prunes duplicate binaries from the game tree, and rebuilds cleanly while
 preserving saves and user config (settings.toml, etc.).
 EOF
+
+# Normalize mtimes to "now" so extractors do not see CI clocks ahead of users
+# (Ninja "build.ninja still dirty" loops). The CLI also clamps on rebuild.
+find "${STAGE}" -exec touch -c {} + 2>/dev/null || find "${STAGE}" -exec touch {} +
 
 (
   cd "${STAGE}"
