@@ -98,7 +98,9 @@ rebuild UI and no linked BIOS backends. First-run generate emits OpenBIOS
 (+ optional SCPH1001) and game C locally, then rebuild links them.
 
 Release zips use `scripts/package_setup_release.sh` and embed
-`psxrecomp-game` + `psxrecomp-bios` (plus the CLI) inside `psxrecomp/`.
+`psxrecomp-game` + `psxrecomp-bios` (plus the CLI) inside `psxrecomp/`, and a
+portable `toolchain/` from `retcomm-toolchains` (`BPE_TOOLCHAIN_DIR`). The
+wizard rebuild prunes `toolchain/` + build intermediates after success.
 CI has no BIOS dump / private-asset dependency.
 
 When sources are missing (or `BPE_FORCE_SETUP=1`), the launcher offers

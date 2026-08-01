@@ -225,8 +225,13 @@ if [[ ! -f "${STAGE}/psxrecomp/psxrecomp_cli.py" ]]; then
   exit 1
 fi
 
-# Optional bundled toolchain (cmake/ninja/compiler pack root).
+# Bundled portable toolchain (cmake/ninja/compiler pack root).
+# CI sets BPE_TOOLCHAIN_DIR from retcomm-toolchains so the zip is self-building.
 if [[ -n "${BPE_TOOLCHAIN_DIR:-}" && -d "${BPE_TOOLCHAIN_DIR}" ]]; then
+  if [[ ! -d "${BPE_TOOLCHAIN_DIR}/bin" ]]; then
+    echo "error: BPE_TOOLCHAIN_DIR missing bin/: ${BPE_TOOLCHAIN_DIR}" >&2
+    exit 1
+  fi
   mkdir -p "${STAGE}/toolchain"
   if command -v rsync >/dev/null 2>&1; then
     rsync -a --delete "${BPE_TOOLCHAIN_DIR}/" "${STAGE}/toolchain/"
@@ -234,6 +239,8 @@ if [[ -n "${BPE_TOOLCHAIN_DIR:-}" && -d "${BPE_TOOLCHAIN_DIR}" ]]; then
     cp -a "${BPE_TOOLCHAIN_DIR}/." "${STAGE}/toolchain/"
   fi
   echo "bundled toolchain from ${BPE_TOOLCHAIN_DIR}"
+else
+  echo "warning: BPE_TOOLCHAIN_DIR unset — zip will need system cmake/ninja" >&2
 fi
 
 # Never ship game generated C or retail BIOS dumps.
@@ -276,20 +283,18 @@ Platform: ${ARTIFACT_TAG}
 
 One zip for first install and updates. Does NOT include disc images, retail
 BIOS dumps, or pre-generated game C. Emitters (psxrecomp-game / psxrecomp-bios)
-and the CLI are already inside psxrecomp/.
+and the CLI are inside psxrecomp/. A portable cmake/clang pack is under
+toolchain/ (removed automatically after a successful Generate & rebuild).
 
 Standalone:
 1. Install Python 3.
-2. Ensure cmake + a C/C++ toolchain are on PATH, or use ./toolchain if bundled:
-     . ./toolchain/env.sh          # Linux/macOS
-3. Run ${EXE_BASENAME}
-4. Provide your legally owned Bomberman Party Edition disc (and optional
+2. Run ${EXE_BASENAME} (uses ./toolchain when present; else system cmake).
+3. Provide your legally owned Bomberman Party Edition disc (and optional
    retail SCPH-1001 BIOS; otherwise OpenBIOS is regenerated locally).
-5. Follow the Generate & rebuild wizard.
+4. Follow the Generate & rebuild wizard.
 
-RetComM uses this same zip: it promotes tools into a shared SDK cache,
-prunes duplicate binaries from the game tree, and rebuilds cleanly while
-preserving saves and user config (settings.toml, etc.).
+RetComM uses this same zip: it promotes tools + toolchain into shared caches,
+prunes per-title copies after build, and preserves saves/user config.
 EOF
 
 # Normalize mtimes to "now" so extractors do not see CI clocks ahead of users

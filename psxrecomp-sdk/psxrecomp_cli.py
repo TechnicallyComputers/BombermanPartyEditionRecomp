@@ -33,6 +33,111 @@ EXIT_USAGE = 2
 EXIT_VERIFY = 3
 
 
+def resolve_embedded_toolchain_bin(project_root: Path) -> Optional[Path]:
+    """Return ``toolchain/bin`` (or nested ``toolchain/*/bin``) when usable."""
+    root = project_root / "toolchain"
+    if not root.is_dir():
+        return None
+    direct = root / "bin"
+    if (direct / "cmake").is_file() or (direct / "cmake.exe").is_file():
+        return direct
+    try:
+        kids = [p for p in root.iterdir() if p.is_dir()]
+    except OSError:
+        return None
+    if len(kids) == 1:
+        nested = kids[0] / "bin"
+        if (nested / "cmake").is_file() or (nested / "cmake.exe").is_file():
+            return nested
+    return None
+
+
+def activate_embedded_toolchain(
+    project_root: Path, progress: Optional[ProgressReporter] = None
+) -> bool:
+    """Prepend game-zip ``toolchain/bin`` to PATH for cmake/ninja/clang."""
+    bin_dir = resolve_embedded_toolchain_bin(project_root)
+    if not bin_dir:
+        return False
+    prefix = str(bin_dir)
+    cur = os.environ.get("PATH", "")
+    parts = cur.split(os.pathsep) if cur else []
+    if parts and Path(parts[0]) == bin_dir:
+        return True
+    os.environ["PATH"] = prefix + (os.pathsep + cur if cur else "")
+    # Help cmake find the pack compilers when env.sh was not sourced.
+    for name, env_key in (("clang", "CC"), ("clang++", "CXX"), ("clang.exe", "CC"),
+                            ("clang++.exe", "CXX")):
+        cand = bin_dir / name
+        if cand.is_file() and env_key not in os.environ:
+            os.environ[env_key] = str(cand)
+    if progress:
+        progress.log(f"Using embedded toolchain: {bin_dir}")
+    return True
+
+
+def prune_after_rebuild(
+    project_root: Path,
+    build_dir: Path,
+    modes: set[str],
+    progress: ProgressReporter,
+) -> None:
+    """Free disk after a successful rebuild (wizard / one-shot setup)."""
+    if not modes:
+        return
+    if "toolchain" in modes or "all" in modes:
+        tc = project_root / "toolchain"
+        if tc.is_dir():
+            shutil.rmtree(tc, ignore_errors=True)
+            progress.log(f"Pruned {tc}")
+    if "build-intermediates" in modes or "all" in modes:
+        if build_dir.is_dir():
+            for name in ("CMakeFiles", ".ninja_deps", ".ninja_log", "CMakeCache.txt",
+                         "cmake_install.cmake", "build.ninja", "compile_commands.json"):
+                p = build_dir / name
+                if p.is_dir():
+                    shutil.rmtree(p, ignore_errors=True)
+                elif p.is_file():
+                    try:
+                        p.unlink()
+                    except OSError:
+                        pass
+            # Drop object/lib digests but keep the launch binary + assets/.
+            for p in build_dir.rglob("*"):
+                if not p.is_file():
+                    continue
+                if p.suffix in {".o", ".obj", ".a", ".lib", ".pdb", ".ilk", ".exp"}:
+                    try:
+                        p.unlink()
+                    except OSError:
+                        pass
+            progress.log(f"Pruned build intermediates under {build_dir}")
+    if "build-tree" in modes:
+        # Keep only the executable + assets next to it, then wipe the rest of
+        # the build dir by moving keepers aside — used by aggressive cleanup.
+        if build_dir.is_dir():
+            keep_names = set()
+            for p in build_dir.iterdir():
+                if p.is_file() and os.access(p, os.X_OK):
+                    keep_names.add(p.name)
+                if p.name.lower().endswith(".exe"):
+                    keep_names.add(p.name)
+            assets = build_dir / "assets"
+            staging = build_dir.parent / f".prune-keep-{build_dir.name}"
+            if staging.exists():
+                shutil.rmtree(staging, ignore_errors=True)
+            staging.mkdir(parents=True, exist_ok=True)
+            for name in keep_names:
+                src = build_dir / name
+                if src.is_file():
+                    shutil.move(str(src), str(staging / name))
+            if assets.is_dir():
+                shutil.move(str(assets), str(staging / "assets"))
+            shutil.rmtree(build_dir, ignore_errors=True)
+            staging.rename(build_dir)
+            progress.log(f"Pruned build tree to binary+assets under {build_dir}")
+
+
 def clamp_future_mtimes(
     root: Path,
     *,
@@ -393,6 +498,7 @@ def cmd_verify_disc(args: argparse.Namespace, progress: ProgressReporter) -> int
         if args.project_root
         else config.parent
     )
+    activate_embedded_toolchain(project_root, progress)
     disc = Path(args.disc).expanduser()
     if not disc.is_absolute():
         disc = (project_root / disc).resolve()
@@ -462,6 +568,7 @@ def cmd_generate(args: argparse.Namespace, progress: ProgressReporter) -> int:
         if args.project_root
         else config.parent
     )
+    activate_embedded_toolchain(project_root, progress)
     secs = load_sections(config)
     game = secs.get("game") or {}
     prep = secs.get("prepare_disc") or {}
@@ -893,6 +1000,8 @@ def cmd_rebuild(args: argparse.Namespace, progress: ProgressReporter) -> int:
         else:
             disc = None
 
+    activate_embedded_toolchain(project_root, progress)
+
     cmake_extra = []
     if args.cmake_extra:
         cmake_extra.extend(args.cmake_extra)
@@ -985,6 +1094,16 @@ def cmd_rebuild(args: argparse.Namespace, progress: ProgressReporter) -> int:
     exe = build_dir / exe_basename
     if not exe.is_file():
         exe = build_dir / f"{exe_basename}.exe"
+    if not exe.is_file():
+        progress.error(f"build succeeded but binary missing: {exe}", code=EXIT_ERROR)
+        return EXIT_ERROR
+
+    prune_raw = (getattr(args, "prune_after", None) or "").strip()
+    if prune_raw:
+        modes = {m.strip() for m in prune_raw.split(",") if m.strip()}
+        progress.phase("prune", pct=0.97, message="Pruning toolchain / build bulk…")
+        prune_after_rebuild(project_root, build_dir, modes, progress)
+
     progress.phase("done", pct=1.0, message="Rebuild complete")
     progress.result(ok=True, exe=str(exe), pgo=pgo_enabled)
     return EXIT_OK
@@ -1078,6 +1197,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--pgo-video",
         action="store_true",
         help="show a game window during train (includes host present paths)",
+    )
+    r.add_argument(
+        "--prune-after",
+        default="",
+        help=(
+            "comma list after success: toolchain, build-intermediates, "
+            "build-tree, all (frees disk for one-shot wizard installs)"
+        ),
     )
     r.add_argument("--cmake-extra", action="append", default=[])
     r.set_defaults(handler=cmd_rebuild)

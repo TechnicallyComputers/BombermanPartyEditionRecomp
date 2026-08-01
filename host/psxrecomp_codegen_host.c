@@ -9,6 +9,7 @@
 #if defined(_WIN32)
 #  include <windows.h>
 #else
+#  include <dirent.h>
 #  include <errno.h>
 #  include <fcntl.h>
 #  include <spawn.h>
@@ -30,6 +31,7 @@ static char g_helper_path[1100];
 static char g_cmake_target[256];
 static char g_exe_basename[256];
 static char g_display[128];
+static char g_toolchain_bin[1100];
 static int g_ready;
 static int g_relaunch_is_helper;
 
@@ -150,11 +152,119 @@ static int find_python(char* out, size_t cap) {
     return 0;
 }
 
+static int resolve_toolchain_bin(char* out, size_t cap) {
+    char cand[1100], cmake[1200];
+    if (!g_project_root[0])
+        return 0;
+    if (!join_path(cand, sizeof(cand), g_project_root, "toolchain/bin"))
+        return 0;
+#if defined(_WIN32)
+    if (join_path(cmake, sizeof(cmake), cand, "cmake.exe") && path_is_file(cmake)) {
+        snprintf(out, cap, "%s", cand);
+        return 1;
+    }
+#else
+    if (join_path(cmake, sizeof(cmake), cand, "cmake") && path_is_file(cmake)) {
+        snprintf(out, cap, "%s", cand);
+        return 1;
+    }
+#endif
+    /* Nested pack root: toolchain/<name>/bin */
+    char wrap[1100];
+    if (!join_path(wrap, sizeof(wrap), g_project_root, "toolchain"))
+        return 0;
+    if (!path_is_dir(wrap))
+        return 0;
+#if defined(_WIN32)
+    WIN32_FIND_DATAA fd;
+    char pattern[1200];
+    snprintf(pattern, sizeof(pattern), "%s\\*", wrap);
+    HANDLE h = FindFirstFileA(pattern, &fd);
+    if (h == INVALID_HANDLE_VALUE)
+        return 0;
+    int found = 0;
+    do {
+        if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY))
+            continue;
+        if (fd.cFileName[0] == '.')
+            continue;
+        char nested[1100], nbin[1100];
+        if (!join_path(nested, sizeof(nested), wrap, fd.cFileName))
+            continue;
+        if (!join_path(nbin, sizeof(nbin), nested, "bin"))
+            continue;
+        if (join_path(cmake, sizeof(cmake), nbin, "cmake.exe") && path_is_file(cmake)) {
+            snprintf(out, cap, "%s", nbin);
+            found = 1;
+            break;
+        }
+    } while (FindNextFileA(h, &fd));
+    FindClose(h);
+    return found;
+#else
+    DIR* dir = opendir(wrap);
+    if (!dir)
+        return 0;
+    int found = 0;
+    struct dirent* ent;
+    while ((ent = readdir(dir)) != NULL) {
+        if (ent->d_name[0] == '.')
+            continue;
+        char nested[1100], nbin[1100];
+        if (!join_path(nested, sizeof(nested), wrap, ent->d_name))
+            continue;
+        if (!path_is_dir(nested))
+            continue;
+        if (!join_path(nbin, sizeof(nbin), nested, "bin"))
+            continue;
+        if (join_path(cmake, sizeof(cmake), nbin, "cmake") && path_is_file(cmake)) {
+            snprintf(out, cap, "%s", nbin);
+            found = 1;
+            break;
+        }
+    }
+    closedir(dir);
+    return found;
+#endif
+}
+
+static void activate_toolchain_path(void) {
+    g_toolchain_bin[0] = '\0';
+    if (!resolve_toolchain_bin(g_toolchain_bin, sizeof(g_toolchain_bin)))
+        return;
+    const char* old = getenv("PATH");
+#if defined(_WIN32)
+    char neu[8192];
+    snprintf(neu, sizeof(neu), "%s%s%s", g_toolchain_bin, old ? ";" : "",
+             old ? old : "");
+    _putenv_s("PATH", neu);
+#else
+    char neu[8192];
+    snprintf(neu, sizeof(neu), "%s%s%s", g_toolchain_bin, old ? ":" : "",
+             old ? old : "");
+    setenv("PATH", neu, 1);
+#endif
+}
+
 static int find_cmake(char* out, size_t cap) {
     const char* env = getenv("CMAKE");
     if (env && env[0] && path_is_file(env)) {
         snprintf(out, cap, "%s", env);
         return 1;
+    }
+    char tc[1100], cand[1200];
+    if (resolve_toolchain_bin(tc, sizeof(tc))) {
+#if defined(_WIN32)
+        if (join_path(cand, sizeof(cand), tc, "cmake.exe") && path_is_file(cand)) {
+            snprintf(out, cap, "%s", cand);
+            return 1;
+        }
+#else
+        if (join_path(cand, sizeof(cand), tc, "cmake") && path_is_file(cand)) {
+            snprintf(out, cap, "%s", cand);
+            return 1;
+        }
+#endif
     }
 #if defined(_WIN32)
     return find_on_path("cmake.exe", out, cap);
@@ -499,6 +609,7 @@ static int host_prepare_generate(const char* source_path, char* out_path,
         snprintf(err_msg, err_cap, "No disc selected.");
         return 0;
     }
+    activate_toolchain_path();
     if (on_progress)
         on_progress(progress_ctx, 0.02f, "Starting psxrecomp generate…");
 
@@ -590,6 +701,8 @@ static int write_windows_deferred_rebuild_helper(char* err_msg, size_t err_cap) 
     bat_write_set(f, "EXE_BASE", g_exe_basename);
     bat_write_set(f, "EXE", g_exe_path);
     bat_write_set(f, "DISPLAY", g_display);
+    if (g_toolchain_bin[0])
+        bat_write_set(f, "TC_BIN", g_toolchain_bin);
     fprintf(f,
             "echo Waiting for %%DISPLAY%% to exit...\r\n"
             ":waitloop\r\n"
@@ -601,10 +714,11 @@ static int write_windows_deferred_rebuild_helper(char* err_msg, size_t err_cap) 
             ")\r\n"
             "echo Building...\r\n"
             "cd /d \"%%ROOT%%\"\r\n"
+            "if defined TC_BIN set \"PATH=%%TC_BIN%%;%%PATH%%\"\r\n"
             "\"%%PYTHON%%\" \"%%CLI%%\" rebuild --project-root \"%%ROOT%%\" "
             "--config \"%%CONFIG%%\" --build-dir \"%%BUILD_DIR%%\" "
             "--target \"%%TARGET%%\" --exe-basename \"%%EXE_BASE%%\" "
-            "--no-pgo\r\n"
+            "--no-pgo --prune-after toolchain,build-intermediates\r\n"
             "if errorlevel 1 (\r\n"
             "  echo.\r\n"
             "  echo Build failed. Fix the errors above, then rebuild manually.\r\n"
@@ -632,6 +746,7 @@ static int host_rebuild_game(const char* disc_path, char* out_exe_path,
 #if defined(_WIN32)
     (void)disc_path;
     (void)g_cmake;
+    activate_toolchain_path();
     if (on_progress)
         on_progress(progress_ctx, 0.4f,
                     "Scheduling Windows rebuild after exit…");
@@ -647,8 +762,10 @@ static int host_rebuild_game(const char* disc_path, char* out_exe_path,
     if (on_progress)
         on_progress(progress_ctx, 0.05f, "Starting rebuild (cmake)…");
 
+    activate_toolchain_path();
+
     char disc_arg_storage[1100];
-    char* argv[32];
+    char* argv[36];
     int argc = 0;
     argv[argc++] = g_python;
     argv[argc++] = g_cli_path;
@@ -669,6 +786,8 @@ static int host_rebuild_game(const char* disc_path, char* out_exe_path,
         argv[argc++] = disc_arg_storage;
     }
     argv[argc++] = "--no-pgo";
+    argv[argc++] = "--prune-after";
+    argv[argc++] = "toolchain,build-intermediates";
     argv[argc++] = "--json-progress";
     argv[argc] = NULL;
 
@@ -755,6 +874,7 @@ void psxrecomp_codegen_host_apply(RecompLauncherCGameInfo* gi,
     g_build_dir[0] = '\0';
     g_exe_path[0] = '\0';
     g_helper_path[0] = '\0';
+    g_toolchain_bin[0] = '\0';
 
     snprintf(g_display, sizeof(g_display), "%s",
              cfg_or(cfg->display_name, "Game"));
@@ -796,6 +916,7 @@ void psxrecomp_codegen_host_apply(RecompLauncherCGameInfo* gi,
     }
 
     g_ready = 1;
+    activate_toolchain_path();
     gi->prepare_with_progress = host_prepare_generate;
     gi->prepare_use_selected_rom = 1;
     /* Number prefix is applied in the setup UI (BIOS adds a step). */

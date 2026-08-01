@@ -203,6 +203,56 @@ jobs:
             "${EXTRA[@]}"
           cmake --build build-ci --target psx-runtime -j"${JOBS}"
 
+      - name: Fetch portable toolchain pack
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          case "${{ matrix.artifact }}" in
+            linux-x64) PATTERN='cmake-clang-v1*linux*.zip' ;;
+            windows-x64) PATTERN='cmake-clang-v1*windows*.zip' ;;
+            macos-arm64|macos-x64) PATTERN='cmake-clang-v1*macos*.zip' ;;
+            *) echo "::error::unknown artifact ${{ matrix.artifact }}"; exit 1 ;;
+          esac
+          rm -rf .cache/toolchain-dl .cache/toolchain-pack
+          mkdir -p .cache/toolchain-dl .cache/toolchain-pack
+          # Public retcomm-toolchains release (same packs RetComM used to fetch).
+          if command -v gh >/dev/null 2>&1; then
+            gh release download -R TechnicallyComputers/retcomm-toolchains \
+              -p "${PATTERN}" -D .cache/toolchain-dl --clobber
+          else
+            echo "::error::gh CLI required to fetch toolchain pack"
+            exit 1
+          fi
+          ZIP="$(find .cache/toolchain-dl -maxdepth 1 -type f -name '*.zip' | head -n1)"
+          if [[ -z "${ZIP}" ]]; then
+            echo "::error::no toolchain zip matching ${PATTERN}"
+            ls -la .cache/toolchain-dl >&2 || true
+            exit 1
+          fi
+          echo "Embedding toolchain from ${ZIP}"
+          if command -v unzip >/dev/null 2>&1; then
+            unzip -q "${ZIP}" -d .cache/toolchain-pack
+          else
+            python3 -c 'import zipfile,pathlib; z=next(pathlib.Path(".cache/toolchain-dl").glob("*.zip")); zipfile.ZipFile(z).extractall(".cache/toolchain-pack")'
+          fi
+          # Unwrap single top-level dir if present.
+          shopt -s nullglob
+          entries=(.cache/toolchain-pack/*)
+          shopt -u nullglob
+          if [[ ${#entries[@]} -eq 1 && -d "${entries[0]}" ]]; then
+            BPE_TOOLCHAIN_DIR="$(cd "${entries[0]}" && pwd)"
+          else
+            BPE_TOOLCHAIN_DIR="$(cd .cache/toolchain-pack && pwd)"
+          fi
+          test -d "${BPE_TOOLCHAIN_DIR}/bin" || {
+            echo "::error::toolchain pack missing bin/ under ${BPE_TOOLCHAIN_DIR}"
+            find .cache/toolchain-pack -maxdepth 3 >&2 || true
+            exit 1
+          }
+          echo "BPE_TOOLCHAIN_DIR=${BPE_TOOLCHAIN_DIR}"
+          echo "BPE_TOOLCHAIN_DIR=${BPE_TOOLCHAIN_DIR}" >>"$GITHUB_ENV"
+
       - name: Package setup zip
         run: |
           set -euo pipefail
@@ -211,6 +261,10 @@ jobs:
             export BPE_RUNTIME_BIN_DIR=/mingw64/bin
           fi
           export BPE_RELEASE_VERSION
+          if [[ -z "${BPE_TOOLCHAIN_DIR:-}" || ! -d "${BPE_TOOLCHAIN_DIR}/bin" ]]; then
+            echo "::error::BPE_TOOLCHAIN_DIR not set — portable zip requires toolchain/"
+            exit 1
+          fi
           # Overlay SDK + both emitters *before* the game zip so one bpe-*.zip
           # is wizard-complete (same artifact RetComM uses for install/update).
           cp -a psxrecomp-sdk/. psxrecomp/

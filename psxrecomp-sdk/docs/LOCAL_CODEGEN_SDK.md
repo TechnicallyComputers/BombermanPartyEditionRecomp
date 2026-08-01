@@ -20,12 +20,12 @@ then game C, then rebuild links everything.
 |-------|------|
 | Setup exe | `recomp-ui` + codegen host; opens Generate & rebuild |
 | Game zip `psxrecomp/` | `psxrecomp_cli.py`, `tools/`, `psxrecomp-game` + `psxrecomp-bios` |
-| Toolchain pack | RetComM `cmake-clang-v1` (optional under `toolchain/` in game zips) |
+| Game zip `toolchain/` | Portable `cmake-clang-v1` (cmake/ninja/clang); pruned after rebuild |
 | Game sources | `game.toml`, seeds, `CMakeLists.txt`, `psxrecomp/`, `recomp-ui/` |
 
-RetComM harvests emitters from the game zip into a shared SDK cache (no
-separate tools zip). Direct-download zips are wizard-complete; document
-Python 3 and cmake/toolchain on PATH (or bundled `toolchain/`).
+RetComM harvests emitters + toolchain into shared caches (no separate tools
+zip required). Wizard rebuild uses `--prune-after toolchain,build-intermediates`.
+Needs Python 3; cmake comes from `toolchain/` when bundled.
 
 ## Commands
 
