@@ -15,11 +15,16 @@ and BIOS stay local and gitignored.
 | `seeds/` | Function-start seeds for `psxrecomp-game` |
 | `bpe/` | Local disc `.bin`/`.cue`, `SLUS_011.89`, `SYSTEM.CNF` (gitignored) |
 | `psxrecomp/` | Framework submodule (`mstan/psxrecomp`) |
+| `recomp-ui/` | Launcher UI submodule |
 | `generated/` | Local recompiler output (created by Generate & rebuild; not required for CI setup host) |
 | `VERSION` | Release / lobby match pin (e.g. `0.1.1`) |
 | `DISC.md` | Disc identity + hashes |
 | `psxrecomp/tools/prepare_disc.py` | Framework disc normalize (config from `game.toml`) |
 | `tools/prepare_disc.py` | Thin wrapper → framework tool |
+
+Framework-wide guide for this layout, the shared CI template, and the
+setup-host release checklist:
+[`psxrecomp/docs/GAME_PROJECT_SETUP.md`](psxrecomp/docs/GAME_PROJECT_SETUP.md).
 
 ## Disc
 
@@ -92,8 +97,8 @@ Repack: `bash scripts/package_release.sh build-mingw-netplay windows-x64-mingw`
 
 ### Setup host / local generate / rebuild
 
-Configure without game/BIOS `generated/` (or `-DBPE_FORCE_SETUP_HOST=ON`
-`-DPSXRECOMP_ALLOW_NO_BIOS=ON`) to build a **setup host** with the Generate &
+Configure without game/BIOS `generated/` (or `-DPSXRECOMP_FORCE_SETUP_HOST=ON`)
+to build a **setup host** with the Generate &
 rebuild UI and no linked BIOS backends. First-run generate emits OpenBIOS
 (+ optional SCPH1001) and game C locally, then rebuild links them.
 
@@ -104,8 +109,8 @@ wizard rebuild prunes `toolchain/` + build intermediates after success.
 CI has no BIOS dump / private-asset dependency.
 
 When sources are missing (or `BPE_FORCE_SETUP=1`), the launcher offers
-**Generate & rebuild** via `psxrecomp_cli.py` (see
-`psxrecomp-sdk/docs/LOCAL_CODEGEN_SDK.md`). BPE ships with `[pgo] enabled = false`
+**Generate & rebuild** via `psxrecomp/psxrecomp_cli.py` (see
+`psxrecomp/docs/LOCAL_CODEGEN_SDK.md`). BPE ships with `[pgo] enabled = false`
 — plain Release is enough; setup does not run a PGO train.
 
 ```bash

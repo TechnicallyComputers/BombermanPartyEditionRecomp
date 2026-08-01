@@ -94,85 +94,20 @@ if [[ ! -f "${STAGE}/assets/img/boxart.tga" ]]; then
   fi
 fi
 
-# Windows MinGW: bundle DLL deps the exe still imports (SDL2 / libgcc / …).
-bundle_mingw_dlls() {
-  local exe="$1"
-  local objdump=""
-  local dll
-  local src
-  local -a needed=()
-
-  if command -v x86_64-w64-mingw32-objdump >/dev/null 2>&1; then
-    objdump="x86_64-w64-mingw32-objdump"
-  elif command -v objdump >/dev/null 2>&1; then
-    objdump="objdump"
-  else
-    echo "warning: no objdump; skipping MinGW DLL bundling" >&2
-    return 0
-  fi
-
-  mapfile -t needed < <(
-    "${objdump}" -p "${exe}" 2>/dev/null \
-      | awk '/DLL Name:/{print $3}' \
-      | grep -viE '^(KERNEL32|USER32|GDI32|ADVAPI32|SHELL32|OLE32|OLEAUT32|WS2_32|WINMM|IMM32|SETUPAPI|VERSION|OPENGL32|COMCTL32|COMDLG32|RPCRT4|SHLWAPI|CRYPT32|BCRYPT|IPHLPAPI|NSI|DNSAPI|MSVCRT|UCRTBASE|VCRUNTIME|API-MS-).*\.DLL$' \
-      | sort -u
-  )
-
-  # Always try common MinGW runtime names when packaging a Windows tag,
-  # even if objdump missed them (stripped / unusual PE).
-  if [[ "${ARTIFACT_TAG}" == *windows* || "${ARTIFACT_TAG}" == *mingw* ]]; then
-    needed+=(
-      SDL2.dll
-      libgcc_s_seh-1.dll
-      libstdc++-6.dll
-      libwinpthread-1.dll
-      libssp-0.dll
-    )
-  fi
-
-  # Deduplicate (case-insensitive) while preserving order.
-  local -A seen=()
-  local -a unique=()
-  for dll in "${needed[@]}"; do
-    [[ -n "${dll}" ]] || continue
-    local key
-    key="$(printf '%s' "${dll}" | tr '[:upper:]' '[:lower:]')"
-    if [[ -n "${seen[$key]:-}" ]]; then
-      continue
-    fi
-    seen[$key]=1
-    unique+=("${dll}")
-  done
-
-  for dll in "${unique[@]}"; do
-    src=""
-    if [[ -f "${EXE_DIR}/${dll}" ]]; then
-      src="${EXE_DIR}/${dll}"
-    elif [[ -f "${BUILD_DIR}/${dll}" ]]; then
-      src="${BUILD_DIR}/${dll}"
-    elif [[ -f "${RUNTIME_BIN_DIR}/${dll}" ]]; then
-      src="${RUNTIME_BIN_DIR}/${dll}"
-    else
-      # Only hard-fail for DLLs objdump said we need (not the always-try list).
-      if "${objdump}" -p "${exe}" 2>/dev/null | grep -qi "DLL Name:[[:space:]]*${dll}"; then
-        echo "error: required DLL missing: ${dll}" >&2
-        echo "  looked in ${EXE_DIR}, ${BUILD_DIR}, ${RUNTIME_BIN_DIR}" >&2
-        echo "  tip: rebuild with PSX_STATIC_RUNTIME=ON, or install MinGW SDL2" >&2
-        exit 1
-      fi
-      continue
-    fi
-    # Skip copy if the exe does not import this DLL (always-try list).
-    if ! "${objdump}" -p "${exe}" 2>/dev/null | grep -qi "DLL Name:[[:space:]]*${dll}"; then
-      continue
-    fi
-    cp -f "${src}" "${STAGE}/"
-    echo "bundled ${dll}"
-  done
-}
-
+# Windows MinGW: bundle DLL deps via shared psxrecomp helper.
 if [[ "${EXE_BASENAME}" == *.exe ]]; then
-  bundle_mingw_dlls "${STAGE_EXE}"
+  BUNDLE_DLLS="${ROOT}/psxrecomp/tools/bundle_mingw_dlls.sh"
+  if [[ ! -f "${BUNDLE_DLLS}" ]]; then
+    echo "error: psxrecomp/tools/bundle_mingw_dlls.sh not found" >&2
+    exit 1
+  fi
+  chmod +x "${BUNDLE_DLLS}" 2>/dev/null || true
+  bash "${BUNDLE_DLLS}" \
+    --soft-missing \
+    --runtime-bin "${RUNTIME_BIN_DIR}" \
+    --search-dir "${EXE_DIR}" \
+    --search-dir "${BUILD_DIR}" \
+    --exe "${STAGE_EXE}" --dest "${STAGE}" --label "${EXE_BASENAME}"
 fi
 
 cp -a "${ROOT}/game.toml" "${STAGE}/"

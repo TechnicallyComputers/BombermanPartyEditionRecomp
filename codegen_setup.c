@@ -1,4 +1,4 @@
-/* Bomberman Party Edition config for the portable psxrecomp codegen host. */
+/* Bomberman Party Edition config for psxrecomp/host/psxrecomp_codegen_host. */
 
 #include "codegen_setup.h"
 

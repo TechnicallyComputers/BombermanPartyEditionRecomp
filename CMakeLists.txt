@@ -41,118 +41,25 @@ elseif(PSX_PGO STREQUAL "use")
     endif()
 endif()
 
-# Release version pin for netplay lobby matching (baked as PSX_GAME_VERSION).
-file(READ "${CMAKE_CURRENT_SOURCE_DIR}/VERSION" _BPE_VER_RAW)
-string(STRIP "${_BPE_VER_RAW}" BPE_RELEASE_VERSION)
-set(PSX_GAME_VERSION "" CACHE STRING
-    "Lobby release pin (empty = Release uses VERSION file, else dev)")
-if(PSX_GAME_VERSION STREQUAL "")
-    get_property(_bpe_is_multi GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
-    if(_bpe_is_multi)
-        set(PSX_GAME_VERSION "$<IF:$<CONFIG:Release>,${BPE_RELEASE_VERSION},dev>")
-    elseif(CMAKE_BUILD_TYPE STREQUAL "Release")
-        set(PSX_GAME_VERSION "${BPE_RELEASE_VERSION}")
-    else()
-        set(PSX_GAME_VERSION "dev")
-    endif()
-endif()
-message(STATUS "BPE lobby game_version: ${PSX_GAME_VERSION} (from VERSION=${BPE_RELEASE_VERSION})")
-
-set(PSXRECOMP_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/psxrecomp" CACHE PATH
-    "Path to psxrecomp")
-
-# Game-root recomp-ui (not under psxrecomp/lib/).
-set(RECOMP_UI_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/recomp-ui" CACHE PATH
-    "Path to recomp-ui launcher" FORCE)
-
-# Prefer the framework-vendored recomp-net submodule (CI recursive checkout).
-# Multiplayer title: opt into PSX_NETPLAY when the submodule is present
-# (runtime.cmake defaults OFF). Override with -DPSX_NETPLAY=OFF.
-if(EXISTS "${PSXRECOMP_ROOT}/lib/recomp-net/CMakeLists.txt")
-    if(NOT RECOMP_NET_ROOT)
-        set(RECOMP_NET_ROOT "${PSXRECOMP_ROOT}/lib/recomp-net" CACHE PATH
-            "Path to recomp-net; empty = auto-discover" FORCE)
-    endif()
-    if(NOT DEFINED PSX_NETPLAY)
-        set(PSX_NETPLAY ON)
-    endif()
-endif()
-
-# ---- Setup host vs full game ----
-# When generated/ is missing (fresh clone / CI setup zip), build a launcher-only
-# host with no game C and no BIOS backends. First-run Generate & rebuild emits
-# BIOS + game C locally, then reconfigure links them into psx-runtime.
+# Legacy aliases still accepted by CI / docs.
 option(BPE_FORCE_SETUP_HOST
     "Build without linking game C even if generated/ exists" OFF)
 option(BPE_REQUIRE_GAME_C
     "Fail configure if generated game C is missing (old CI behavior)" OFF)
 
-set(BPE_GEN_MARKER
-    "${CMAKE_CURRENT_SOURCE_DIR}/generated/SLUS_011.89_dispatch.c")
-set(BPE_HAS_GAME_C FALSE)
-if(EXISTS "${BPE_GEN_MARKER}" AND NOT BPE_FORCE_SETUP_HOST)
-    set(BPE_HAS_GAME_C TRUE)
-endif()
-
-if(NOT BPE_HAS_GAME_C)
-    set(PSXRECOMP_ALLOW_NO_BIOS ON CACHE BOOL
-        "Allow runtime with no BIOS backends (setup host)" FORCE)
-endif()
-
+set(PSXRECOMP_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/psxrecomp" CACHE PATH
+    "Path to psxrecomp")
 include("${PSXRECOMP_ROOT}/runtime/runtime.cmake")
 
-if(BPE_REQUIRE_GAME_C AND NOT BPE_HAS_GAME_C)
-    message(FATAL_ERROR
-        "BPE_REQUIRE_GAME_C=ON but ${BPE_GEN_MARKER} is missing. "
-        "Generate with psxrecomp-game --config game.toml, or leave "
-        "BPE_REQUIRE_GAME_C off to build the setup host.")
-endif()
-
-set(BPE_RUNTIME_EXTRA_ARGS
-    DEBUG_PORT 4530
+psxrecomp_add_game_runtime(psx-runtime
+    ENABLE_NETPLAY_IF_PRESENT
     WINDOW_TITLE "Bomberman Party Edition Recompiled"
     DEFAULT_GAME_CONFIG_PATH "game.toml"
     LAUNCHER_BOXART "${CMAKE_CURRENT_SOURCE_DIR}/launcher_assets/img/boxart.tga"
-    GAME_VERSION "${PSX_GAME_VERSION}"
+    DEBUG_PORT 4530
     MAX_PLAYERS 5
-    EXTRAS_SOURCES
-        "${CMAKE_CURRENT_SOURCE_DIR}/codegen_setup.c"
-        "${CMAKE_CURRENT_SOURCE_DIR}/host/psxrecomp_codegen_host.c"
-    )
-
-if(BPE_HAS_GAME_C)
-    message(STATUS "BPE: linking generated game C (full runtime)")
-    # No CONFIGURE_DEPENDS: rebuild always reconfigures after generate, and
-    # CONFIGURE_DEPENDS + release-zip clock skew can make Ninja loop forever.
-    file(GLOB BPE_GENERATED_FULL_SHARDS
-        "${CMAKE_CURRENT_SOURCE_DIR}/generated/SLUS_011.89_full_*.c")
-    if(BPE_GENERATED_FULL_SHARDS)
-        set(BPE_GENERATED_FULL "${BPE_GENERATED_FULL_SHARDS}")
-    else()
-        set(BPE_GENERATED_FULL
-            "${CMAKE_CURRENT_SOURCE_DIR}/generated/SLUS_011.89_full.c")
-    endif()
-    set(BPE_GENERATED_DISPATCH "${BPE_GEN_MARKER}")
-
-    psxrecomp_add_runtime_target(psx-runtime
-        GAME_GENERATED_FULL_C "${BPE_GENERATED_FULL}"
-        GAME_GENERATED_DISPATCH_C "${BPE_GENERATED_DISPATCH}"
-        ${BPE_RUNTIME_EXTRA_ARGS}
-    )
-else()
-    message(STATUS
-        "BPE: setup host (no game C, no BIOS backends) — "
-        "first-run Generate & rebuild")
-    psxrecomp_add_runtime_target(psx-runtime
-        ${BPE_RUNTIME_EXTRA_ARGS}
-    )
-endif()
-
-target_compile_definitions(psx-runtime PRIVATE PSX_HAS_GAME_CODEGEN=1)
-# Do NOT add CMAKE_CURRENT_SOURCE_DIR to -I: on case-insensitive macOS that
-# makes #include <version> pick up the repo VERSION pin file (e.g. 0.1.1) and
-# explode libc++. codegen_setup.* live next to their sources; host/ is enough.
-target_include_directories(psx-runtime PRIVATE
-    "${CMAKE_CURRENT_SOURCE_DIR}/host"
-    "${RECOMP_UI_ROOT}/src"
+    GEN_MARKER "generated/SLUS_011.89_dispatch.c"
+    GEN_FULL_GLOB "generated/SLUS_011.89_full_*.c"
+    GEN_FULL_FALLBACK "generated/SLUS_011.89_full.c"
+    CODEGEN_SETUP_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/codegen_setup.c"
 )

@@ -30,7 +30,11 @@ DO_PACKAGE=1
 STATIC_RUNTIME=1
 JOBS="$(nproc 2>/dev/null || echo 4)"
 ARTIFACT_TAG="windows-x64-mingw"
-TOOLCHAIN="${ROOT}/scripts/toolchain-mingw-w64.cmake"
+if [[ -f "${ROOT}/psxrecomp/cmake/toolchain-mingw-w64.cmake" ]]; then
+  TOOLCHAIN="${ROOT}/psxrecomp/cmake/toolchain-mingw-w64.cmake"
+else
+  TOOLCHAIN="${ROOT}/scripts/toolchain-mingw-w64.cmake"
+fi
 RUNTIME_BIN_DIR="/usr/x86_64-w64-mingw32/bin"
 TRIPLE="x86_64-w64-mingw32"
 

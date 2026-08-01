@@ -120,18 +120,11 @@ jobs:
 
       - name: Record pinned framework revisions
         shell: bash
-        run: |
-          set -euo pipefail
-          echo "psxrecomp=$(git -C psxrecomp rev-parse --short HEAD) ($(git -C psxrecomp rev-parse HEAD))"
-          echo "recomp-ui=$(git -C recomp-ui rev-parse --short HEAD)"
-          echo "recomp-net=$(git -C psxrecomp/lib/recomp-net rev-parse --short HEAD)"
+        run: bash psxrecomp/tools/ci/record_pins.sh
 
       - name: Setup host mode (no game C, no BIOS backends)
         shell: bash
-        run: |
-          set -euo pipefail
-          rm -rf generated psxrecomp/generated
-          echo "Cleared any generated/ trees — CI builds a BIOS-free setup host."
+        run: bash psxrecomp/tools/ci/clear_generated.sh
 
       - name: Setup MSYS2 (Windows)
         if: runner.os == 'Windows'
@@ -165,26 +158,7 @@ jobs:
           brew install cmake ninja pkg-config sdl3 || brew install cmake ninja pkg-config sdl2
 
       - name: Build recompiler tools (game + bios emitters)
-        run: |
-          set -euo pipefail
-          JOBS="$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)"
-          if [[ -d /mingw64/bin ]]; then
-            export PATH="/mingw64/bin:${PATH}"
-          fi
-          cmake -S psxrecomp/recompiler -B build-recompiler -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release
-          cmake --build build-recompiler \
-            --target psxrecomp-game psxrecomp-bios -j"${JOBS}"
-          for bin in psxrecomp-bios psxrecomp-game; do
-            if [[ -f "build-recompiler/${bin}.exe" ]]; then
-              chmod +x "build-recompiler/${bin}.exe"
-            elif [[ -f "build-recompiler/${bin}" ]]; then
-              chmod +x "build-recompiler/${bin}"
-            else
-              echo "::error::${bin} missing after recompiler build"
-              exit 1
-            fi
-          done
+        uses: ./psxrecomp/.github/actions/build-emitters
 
       - name: Configure & build setup host (no game C, no BIOS backends)
         env:
@@ -198,79 +172,16 @@ jobs:
           JOBS="$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)"
           cmake -S . -B build-ci -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
-            -DBPE_FORCE_SETUP_HOST=ON \
+            -DPSXRECOMP_FORCE_SETUP_HOST=ON \
             -DPSXRECOMP_ALLOW_NO_BIOS=ON \
             -DPSX_GAME_VERSION="${BPE_RELEASE_VERSION}" \
             "${EXTRA[@]}"
           cmake --build build-ci --target psx-runtime -j"${JOBS}"
 
       - name: Fetch portable toolchain pack
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          case "${{ matrix.artifact }}" in
-            linux-x64)
-              PATTERN='cmake-clang-v1*linux*.zip'
-              ASSET_NAME='cmake-clang-v1-linux-x64.zip'
-              ;;
-            windows-x64)
-              PATTERN='cmake-clang-v1*windows*.zip'
-              ASSET_NAME='cmake-clang-v1-windows-x64.zip'
-              ;;
-            macos-arm64|macos-x64)
-              PATTERN='cmake-clang-v1*macos*.zip'
-              ASSET_NAME='cmake-clang-v1-macos-universal.zip'
-              ;;
-            *) echo "::error::unknown artifact ${{ matrix.artifact }}"; exit 1 ;;
-          esac
-          rm -rf .cache/toolchain-dl .cache/toolchain-pack
-          mkdir -p .cache/toolchain-dl .cache/toolchain-pack
-          # Public retcomm-toolchains release (same packs RetComM used to fetch).
-          # Prefer gh when on PATH (Linux/macOS runners); MSYS2 Windows often
-          # lacks gh — fall back to the known latest-download URL + curl.
-          if command -v gh >/dev/null 2>&1; then
-            gh release download -R TechnicallyComputers/retcomm-toolchains \
-              -p "${PATTERN}" -D .cache/toolchain-dl --clobber
-          elif command -v curl >/dev/null 2>&1; then
-            ASSET_URL="https://github.com/TechnicallyComputers/retcomm-toolchains/releases/latest/download/${ASSET_NAME}"
-            echo "gh not on PATH; curling ${ASSET_URL}"
-            curl -fsSL \
-              ${GH_TOKEN:+-H "Authorization: Bearer ${GH_TOKEN}"} \
-              -o ".cache/toolchain-dl/${ASSET_NAME}" \
-              "${ASSET_URL}"
-          else
-            echo "::error::neither gh nor curl available to fetch toolchain pack"
-            exit 1
-          fi
-          ZIP="$(find .cache/toolchain-dl -maxdepth 1 -type f -name '*.zip' | head -n1)"
-          if [[ -z "${ZIP}" ]]; then
-            echo "::error::no toolchain zip matching ${PATTERN}"
-            ls -la .cache/toolchain-dl >&2 || true
-            exit 1
-          fi
-          echo "Embedding toolchain from ${ZIP}"
-          if command -v unzip >/dev/null 2>&1; then
-            unzip -q "${ZIP}" -d .cache/toolchain-pack
-          else
-            python3 -c 'import zipfile,pathlib; z=next(pathlib.Path(".cache/toolchain-dl").glob("*.zip")); zipfile.ZipFile(z).extractall(".cache/toolchain-pack")'
-          fi
-          # Unwrap single top-level dir if present.
-          shopt -s nullglob
-          entries=(.cache/toolchain-pack/*)
-          shopt -u nullglob
-          if [[ ${#entries[@]} -eq 1 && -d "${entries[0]}" ]]; then
-            BPE_TOOLCHAIN_DIR="$(cd "${entries[0]}" && pwd)"
-          else
-            BPE_TOOLCHAIN_DIR="$(cd .cache/toolchain-pack && pwd)"
-          fi
-          test -d "${BPE_TOOLCHAIN_DIR}/bin" || {
-            echo "::error::toolchain pack missing bin/ under ${BPE_TOOLCHAIN_DIR}"
-            find .cache/toolchain-pack -maxdepth 3 >&2 || true
-            exit 1
-          }
-          echo "BPE_TOOLCHAIN_DIR=${BPE_TOOLCHAIN_DIR}"
-          echo "BPE_TOOLCHAIN_DIR=${BPE_TOOLCHAIN_DIR}" >>"$GITHUB_ENV"
+        uses: ./psxrecomp/.github/actions/fetch-toolchain
+        with:
+          artifact: ${{ matrix.artifact }}
 
       - name: Package setup zip
         run: |
@@ -280,23 +191,12 @@ jobs:
             export BPE_RUNTIME_BIN_DIR=/mingw64/bin
           fi
           export BPE_RELEASE_VERSION
-          if [[ -z "${BPE_TOOLCHAIN_DIR:-}" || ! -d "${BPE_TOOLCHAIN_DIR}/bin" ]]; then
-            echo "::error::BPE_TOOLCHAIN_DIR not set — portable zip requires toolchain/"
+          # Title packager stages host + sources, then calls
+          # psxrecomp/tools/stage_setup_sdk.sh for emitters/toolchain/DLLs.
+          if [[ -z "${PSXRECOMP_TOOLCHAIN_DIR:-${TOOLCHAIN_DIR:-${BPE_TOOLCHAIN_DIR:-}}}" ]]; then
+            echo "::error::toolchain dir not set — fetch-toolchain step failed?"
             exit 1
           fi
-          # Overlay SDK + both emitters *before* the game zip so one bpe-*.zip
-          # is wizard-complete (same artifact RetComM uses for install/update).
-          cp -a psxrecomp-sdk/. psxrecomp/
-          mkdir -p psxrecomp/recompiler/build
-          for cand in \
-              build-recompiler/psxrecomp-game \
-              build-recompiler/psxrecomp-game.exe \
-              build-recompiler/psxrecomp-bios \
-              build-recompiler/psxrecomp-bios.exe; do
-            if [[ -f "$cand" ]]; then
-              cp -a "$cand" "psxrecomp/recompiler/build/$(basename "$cand")"
-            fi
-          done
           scripts/package_setup_release.sh build-ci "${{ matrix.artifact }}" build-recompiler
           ls -la dist/
 
