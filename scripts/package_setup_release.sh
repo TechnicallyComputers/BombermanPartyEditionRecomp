@@ -248,33 +248,117 @@ rm -rf "${STAGE}/generated" "${STAGE}/bpe"
 rm -f "${STAGE}/psxrecomp/bios/SCPH1001.BIN" \
       "${STAGE}/psxrecomp/bios/SCPH1001.bin" 2>/dev/null || true
 
-# Windows MinGW DLL bundling (same heuristic as package_release.sh).
-if [[ "${EXE_BASENAME}" == *.exe ]]; then
+# Windows MinGW: copy imported non-system DLLs next to an exe.
+# Emitters are MSYS2 GCC builds (libstdc++/libgcc); the portable llvm-mingw
+# toolchain does NOT provide those — they must ship beside the .exe.
+bundle_mingw_dlls_into() {
+  local exe="$1"
+  local dest_dir="$2"
+  local label="${3:-$(basename "${exe}")}"
+  local objdump=""
+  local dll src key
+  local -a needed=()
+  local -a unique=()
+  local -A seen=()
+
+  if [[ ! -f "${exe}" ]]; then
+    echo "error: cannot bundle DLLs; missing ${exe}" >&2
+    exit 1
+  fi
+  mkdir -p "${dest_dir}"
+
   if command -v x86_64-w64-mingw32-objdump >/dev/null 2>&1; then
-    OBJDUMP=x86_64-w64-mingw32-objdump
+    objdump="x86_64-w64-mingw32-objdump"
   elif command -v objdump >/dev/null 2>&1; then
-    OBJDUMP=objdump
+    objdump="objdump"
   else
-    OBJDUMP=""
+    echo "error: no objdump; cannot bundle MinGW DLLs for ${label}" >&2
+    exit 1
   fi
-  if [[ -n "${OBJDUMP}" ]]; then
-    mapfile -t needed < <(
-      "${OBJDUMP}" -p "${STAGE}/${EXE_BASENAME}" 2>/dev/null \
-        | awk '/DLL Name:/{print $3}' \
-        | grep -viE '^(KERNEL32|USER32|GDI32|ADVAPI32|SHELL32|OLE32|OLEAUT32|WS2_32|WINMM|IMM32|SETUPAPI|VERSION|OPENGL32|COMCTL32|COMDLG32|RPCRT4|SHLWAPI|CRYPT32|BCRYPT|IPHLPAPI|NSI|DNSAPI|MSVCRT|UCRTBASE|VCRUNTIME|API-MS-).*\.DLL$' \
-        | sort -u || true
-    )
-    for dll in "${needed[@]:-}"; do
-      [[ -n "${dll}" ]] || continue
-      for src in "${EXE_DIR}/${dll}" "${BUILD_DIR}/${dll}" "${RUNTIME_BIN_DIR}/${dll}"; do
-        if [[ -f "${src}" ]]; then
-          cp -f "${src}" "${STAGE}/"
-          echo "bundled ${dll}"
-          break
-        fi
-      done
+
+  mapfile -t needed < <(
+    "${objdump}" -p "${exe}" 2>/dev/null \
+      | awk '/DLL Name:/{print $3}' \
+      | grep -viE '^(KERNEL32|USER32|GDI32|ADVAPI32|SHELL32|OLE32|OLEAUT32|WS2_32|WINMM|IMM32|SETUPAPI|VERSION|OPENGL32|COMCTL32|COMDLG32|RPCRT4|SHLWAPI|CRYPT32|BCRYPT|IPHLPAPI|NSI|DNSAPI|MSVCRT|UCRTBASE|VCRUNTIME|API-MS-).*\.DLL$' \
+      | sort -u || true
+  )
+
+  # Always probe common MinGW runtimes (objdump can miss unusual PE layouts).
+  needed+=(
+    SDL2.dll
+    zlib1.dll
+    libgcc_s_seh-1.dll
+    libstdc++-6.dll
+    libwinpthread-1.dll
+    libssp-0.dll
+  )
+
+  for dll in "${needed[@]}"; do
+    [[ -n "${dll}" ]] || continue
+    key="$(printf '%s' "${dll}" | tr '[:upper:]' '[:lower:]')"
+    if [[ -n "${seen[$key]:-}" ]]; then
+      continue
+    fi
+    seen[$key]=1
+    unique+=("${dll}")
+  done
+
+  for dll in "${unique[@]}"; do
+    # Skip names the exe does not actually import.
+    if ! "${objdump}" -p "${exe}" 2>/dev/null | grep -qi "DLL Name:[[:space:]]*${dll}"; then
+      continue
+    fi
+    src=""
+    for cand in \
+        "$(dirname "${exe}")/${dll}" \
+        "${EXE_DIR}/${dll}" \
+        "${BUILD_DIR}/${dll}" \
+        "${RUNTIME_BIN_DIR}/${dll}" \
+        "/mingw64/bin/${dll}" \
+        "/usr/x86_64-w64-mingw32/bin/${dll}"
+    do
+      if [[ -f "${cand}" ]]; then
+        src="${cand}"
+        break
+      fi
     done
-  fi
+    if [[ -z "${src}" ]]; then
+      echo "error: required DLL missing for ${label}: ${dll}" >&2
+      echo "  looked in $(dirname "${exe}"), ${EXE_DIR}, ${BUILD_DIR}," \
+           "${RUNTIME_BIN_DIR}, /mingw64/bin" >&2
+      exit 1
+    fi
+    cp -f "${src}" "${dest_dir}/"
+    echo "bundled ${dll} → ${dest_dir#${STAGE}/}/ (${label})"
+  done
+}
+
+if [[ "${EXE_BASENAME}" == *.exe ]]; then
+  bundle_mingw_dlls_into "${STAGE}/${EXE_BASENAME}" "${STAGE}" "${EXE_BASENAME}"
+  for emitter in \
+      "${STAGE}/psxrecomp/recompiler/build/psxrecomp-game.exe" \
+      "${STAGE}/psxrecomp/recompiler/build/psxrecomp-bios.exe"
+  do
+    if [[ -f "${emitter}" ]]; then
+      bundle_mingw_dlls_into \
+        "${emitter}" \
+        "$(dirname "${emitter}")" \
+        "$(basename "${emitter}")"
+    fi
+  done
+  # Emitters are required on Windows setup zips — fail closed if absent.
+  for emitter in psxrecomp-game.exe psxrecomp-bios.exe; do
+    if [[ ! -f "${STAGE}/psxrecomp/recompiler/build/${emitter}" ]]; then
+      echo "error: missing ${emitter} in staged tree" >&2
+      exit 1
+    fi
+    for dll in libgcc_s_seh-1.dll libstdc++-6.dll; do
+      if [[ ! -f "${STAGE}/psxrecomp/recompiler/build/${dll}" ]]; then
+        echo "error: ${emitter} staged without ${dll}" >&2
+        exit 1
+      fi
+    done
+  done
 fi
 
 cat >"${STAGE}/README-SETUP.txt" <<EOF
