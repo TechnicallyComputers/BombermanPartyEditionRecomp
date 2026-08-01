@@ -18,6 +18,9 @@
 /isos/
 /saves/
 
+# Generated source code meant to be used in build only
+/generated/
+
 # Disc / image / memcard formats
 *.bin
 *.cue
