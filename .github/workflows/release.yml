@@ -212,8 +212,8 @@ jobs:
             export BPE_RUNTIME_BIN_DIR=/mingw64/bin
           fi
           export BPE_RELEASE_VERSION
-          scripts/package_setup_release.sh build-ci "${{ matrix.artifact }}" build-recompiler
-          # Overlay vendored SDK surface, then pack cli + emitters.
+          # Overlay SDK + both emitters *before* the game zip so one bpe-*.zip
+          # is wizard-complete (same artifact RetComM uses for install/update).
           cp -a psxrecomp-sdk/. psxrecomp/
           mkdir -p psxrecomp/recompiler/build
           for cand in \
@@ -225,6 +225,8 @@ jobs:
               cp -a "$cand" "psxrecomp/recompiler/build/$(basename "$cand")"
             fi
           done
+          scripts/package_setup_release.sh build-ci "${{ matrix.artifact }}" build-recompiler
+          # Optional slim tools zip (shared-cache fallback); game zip is enough.
           scripts/package_psxrecomp_tools.sh psxrecomp "${{ matrix.artifact }}" dist
           ls -la dist/
 

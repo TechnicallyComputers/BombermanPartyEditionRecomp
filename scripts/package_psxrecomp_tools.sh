@@ -83,10 +83,33 @@ cp -a "$BIOS_BIN" "$STAGE/recompiler/build/$(basename "$BIOS_BIN")"
 chmod +x "$STAGE/recompiler/build/$(basename "$GAME_BIN")" 2>/dev/null || true
 chmod +x "$STAGE/recompiler/build/$(basename "$BIOS_BIN")" 2>/dev/null || true
 
+# OpenBIOS / SCPH profiles so RetComM generate works when the game zipball
+# omits the psxrecomp git submodule (no bios/*.toml in the source tree).
+# Never ship retail SCPH1001.BIN — only the MIT OpenBIOS image + profiles.
+mkdir -p "$STAGE/bios" "$STAGE/recompiler/seeds"
+for f in OpenBIOS.toml openbios.bin OpenBIOS.LICENSE SCPH1001.toml; do
+  if [[ ! -f "$PSX_ROOT/bios/$f" ]]; then
+    echo "error: missing bios/$f (required for tools pack generate)" >&2
+    exit 1
+  fi
+  cp -a "$PSX_ROOT/bios/$f" "$STAGE/bios/$f"
+done
+for f in openbios_elf_seeds.json openbios_dispatch_miss.json phase2_ghidra_seeds.json; do
+  if [[ ! -f "$PSX_ROOT/recompiler/seeds/$f" ]]; then
+    echo "error: missing recompiler/seeds/$f" >&2
+    exit 1
+  fi
+  cp -a "$PSX_ROOT/recompiler/seeds/$f" "$STAGE/recompiler/seeds/$f"
+done
+
 # Drop caches / VCS / tests from tools.
 find "$STAGE" -type d -name '__pycache__' -prune -exec rm -rf {} + 2>/dev/null || true
 find "$STAGE" -type d -name 'tests' -prune -exec rm -rf {} + 2>/dev/null || true
 find "$STAGE" -type d -name '.git' -prune -exec rm -rf {} + 2>/dev/null || true
+
+# Marker so psxrecomp-bios treats this pack (or a seeded game psxrecomp/) as
+# the project root when resolving bios/*.toml relative paths.
+printf '%s\n' '# psxrecomp-tools pack root' >"$STAGE/.gitignore"
 
 cat >"$STAGE/retcomm-sdk.json" <<'EOF'
 {
@@ -106,8 +129,10 @@ Point RetComM at this directory with \`RETCOMM_SDK_DIR\`, or merge under a game
 project as \`psxrecomp/\` (cli + tools + recompiler/build/{psxrecomp-game,
 psxrecomp-bios}).
 
-Requires Python 3 on the host. Never ship user discs, BIOS dumps, or
-\`generated/\` game/BIOS C in this pack — first-run generate emits those locally.
+Requires Python 3 on the host. Ships MIT OpenBIOS image + profiles/seeds so
+generate works when the game source zipball omits the psxrecomp submodule.
+Never ship retail BIOS dumps or \`generated/\` game/BIOS C — those are emitted
+locally (optional \`--bios\` for SCPH1001).
 EOF
 
 rm -f "$OUT/$ZIP_NAME"

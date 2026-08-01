@@ -168,11 +168,64 @@ def find_psxrecomp_bios(project_root: Path) -> Path:
 def framework_root(project_root: Path) -> Path:
     """Directory containing bios/*.toml and recompiler/ (usually …/psxrecomp)."""
     cand = project_root / "psxrecomp"
-    if (cand / "bios").is_dir() and (cand / "recompiler").is_dir():
-        return cand
+    if (cand / "bios" / "OpenBIOS.toml").is_file() or (
+        (cand / "bios").is_dir() and (cand / "recompiler").is_dir()
+    ):
+        if (cand / "bios").is_dir():
+            return cand
     if (ROOT / "bios").is_dir() and (ROOT / "recompiler").is_dir():
         return ROOT
     return cand
+
+
+def _copy_missing(src: Path, dest: Path) -> None:
+    if src.is_dir():
+        dest.mkdir(parents=True, exist_ok=True)
+        for child in src.iterdir():
+            _copy_missing(child, dest / child.name)
+        return
+    if not src.is_file():
+        return
+    if dest.is_file():
+        return
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(src, dest)
+
+
+def ensure_framework(
+    project_root: Path, *, progress: Optional[ProgressReporter] = None
+) -> Path:
+    """Ensure project_root/psxrecomp has BIOS profiles + seeds for local generate.
+
+    GitHub zipballs omit git submodules, so RetComM source trees often lack
+    psxrecomp/bios. Seed from the SDK pack that ships this CLI (ROOT).
+    """
+    fw = project_root / "psxrecomp"
+    need_seed = not (fw / "bios" / "OpenBIOS.toml").is_file()
+    if need_seed and (ROOT / "bios").is_dir():
+        if progress:
+            progress.log(
+                f"Seeding psxrecomp BIOS profiles from SDK → {fw}"
+            )
+        fw.mkdir(parents=True, exist_ok=True)
+        _copy_missing(ROOT / "bios", fw / "bios")
+        seeds_src = ROOT / "recompiler" / "seeds"
+        if seeds_src.is_dir():
+            _copy_missing(seeds_src, fw / "recompiler" / "seeds")
+        (fw / "recompiler" / "build").mkdir(parents=True, exist_ok=True)
+    # psxrecomp-bios walks up from bios/*.toml looking for .gitignore/.git/
+    # CMakeLists.txt to find the framework root. Zipball trees lack the
+    # submodule .git — plant a marker so rom = "bios/openbios.bin" resolves.
+    if (fw / "bios").is_dir() and not any(
+        (fw / m).exists() for m in (".gitignore", ".git", "CMakeLists.txt")
+    ):
+        marker = fw / ".gitignore"
+        if not marker.is_file():
+            marker.write_text(
+                "# RetComM SDK seed marker (project-root for psxrecomp-bios)\n",
+                encoding="utf-8",
+            )
+    return framework_root(project_root)
 
 
 def bios_backend_present(fw: Path, stem: str) -> bool:
@@ -199,8 +252,11 @@ def regen_bios_profile(
         raise FileNotFoundError(f"BIOS profile not found: {profile}")
     bios_tool = find_psxrecomp_bios(project_root)
     progress.log(f"regen BIOS via {bios_tool.name} --config {profile_rel}")
+    (fw / "generated").mkdir(parents=True, exist_ok=True)
+    # Pass a framework-relative config path and cwd=fw so toml paths like
+    # rom = "bios/openbios.bin" resolve under the framework root (not bios/bios/).
     proc = subprocess.run(
-        [str(bios_tool), "--config", str(profile)],
+        [str(bios_tool), "--config", profile_rel],
         cwd=str(fw),
         capture_output=True,
         text=True,
@@ -392,8 +448,9 @@ def cmd_generate(args: argparse.Namespace, progress: ProgressReporter) -> int:
         return EXIT_ERROR
 
     # ---- BIOS backends (local only; CI ships none) ----
-    fw = framework_root(project_root)
+    fw = ensure_framework(project_root, progress=progress)
     bios_arg = (getattr(args, "bios", None) or "").strip()
+    staged_retail = False
     if bios_arg:
         bios_path = Path(bios_arg).expanduser()
         if not bios_path.is_absolute():
@@ -415,6 +472,7 @@ def cmd_generate(args: argparse.Namespace, progress: ProgressReporter) -> int:
         try:
             progress.phase("bios", pct=0.2, message="Generating SCPH1001 BIOS C…")
             regen_bios_profile(project_root, "bios/SCPH1001.toml", progress=progress)
+            staged_retail = True
         except Exception as exc:  # noqa: BLE001
             progress.error(str(exc), code=EXIT_ERROR)
             return EXIT_ERROR
@@ -435,8 +493,12 @@ def cmd_generate(args: argparse.Namespace, progress: ProgressReporter) -> int:
             )
             regen_bios_profile(project_root, "bios/OpenBIOS.toml", progress=progress)
         except Exception as exc:  # noqa: BLE001
-            progress.error(str(exc), code=EXIT_ERROR)
-            return EXIT_ERROR
+            # Prefer retail when --bios was given; OpenBIOS is then best-effort.
+            if staged_retail:
+                progress.log(f"OpenBIOS regen skipped (retail BIOS ok): {exc}")
+            else:
+                progress.error(str(exc), code=EXIT_ERROR)
+                return EXIT_ERROR
 
     try:
         game_tool = find_psxrecomp_game(project_root)

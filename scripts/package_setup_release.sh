@@ -8,12 +8,14 @@
 #
 # Writes: dist/bpe-<VERSION>-<artifact-tag>.zip
 #
-# Contents (no disc / BIOS / generated game C):
+# Contents (no disc / retail BIOS / generated game C):
 #   Bomberman_Party_Edition_Recompiled[.exe]  — setup host
-#   assets/, game.toml, VERSION, CMakeLists.txt, codegen_setup.*, seeds/
-#   psxrecomp/   — runtime sources + cli + prebuilt psxrecomp-game
+#   assets/, game.toml, VERSION, CMakeLists.txt, codegen_setup.*, host/, seeds/
+#   psxrecomp/   — runtime + CLI + OpenBIOS profiles + psxrecomp-game/bios
 #   recomp-ui/   — launcher UI sources (needed to rebuild)
 #   toolchain/   — optional; set BPE_TOOLCHAIN_DIR to a pack root to embed
+#
+# Same zip is used for standalone wizard installs and RetComM build/update.
 
 set -euo pipefail
 
@@ -100,6 +102,7 @@ copy_proj "game.toml"
 copy_proj "VERSION"
 copy_proj "codegen_setup.c"
 copy_proj "codegen_setup.h"
+copy_proj "host"
 copy_proj "seeds"
 copy_proj "launcher_assets"
 copy_proj "DISC.md"
@@ -143,8 +146,36 @@ copy_tree_filtered "${ROOT}/recomp-ui" "${STAGE}/recomp-ui" \
   --exclude 'build' \
   --exclude '__pycache__'
 
-# Prebuilt recompiler binary into the staged tree.
-GAME_BIN=""
+# Overlay SDK surface (CLI / prepare_disc / progress helpers) when present.
+# CI copies psxrecomp-sdk into psxrecomp/ before calling this script; this
+# covers local packaging from a clean submodule checkout.
+if [[ -d "${ROOT}/psxrecomp-sdk" ]]; then
+  if command -v rsync >/dev/null 2>&1; then
+    rsync -a "${ROOT}/psxrecomp-sdk/" "${STAGE}/psxrecomp/"
+  else
+    cp -a "${ROOT}/psxrecomp-sdk/." "${STAGE}/psxrecomp/"
+  fi
+fi
+
+# Prebuilt recompiler binaries (game emit + OpenBIOS regen).
+find_tool_bin() {
+  local name="$1"
+  local dir cand
+  for dir in "${SEARCH_ROOTS[@]}"; do
+    for cand in \
+      "${dir}/${name}" \
+      "${dir}/${name}.exe" \
+      "${dir}/Release/${name}.exe"
+    do
+      if [[ -f "${cand}" ]]; then
+        echo "${cand}"
+        return 0
+      fi
+    done
+  done
+  return 1
+}
+
 SEARCH_ROOTS=()
 if [[ -n "${RECOMPILER_BUILD}" ]]; then
   SEARCH_ROOTS+=("$(cd "${RECOMPILER_BUILD}" && pwd)")
@@ -153,26 +184,46 @@ SEARCH_ROOTS+=(
   "${ROOT}/psxrecomp/recompiler/build"
   "${ROOT}/build-recompiler"
 )
-for dir in "${SEARCH_ROOTS[@]}"; do
-  for cand in \
-    "${dir}/psxrecomp-game" \
-    "${dir}/psxrecomp-game.exe" \
-    "${dir}/Release/psxrecomp-game.exe"
-  do
-    if [[ -f "${cand}" ]]; then
-      GAME_BIN="${cand}"
-      break 2
-    fi
-  done
-done
+
+GAME_BIN="$(find_tool_bin psxrecomp-game || true)"
+BIOS_BIN="$(find_tool_bin psxrecomp-bios || true)"
 if [[ -z "${GAME_BIN}" ]]; then
   echo "error: psxrecomp-game not found (pass recompiler-build-dir)" >&2
+  exit 1
+fi
+if [[ -z "${BIOS_BIN}" ]]; then
+  echo "error: psxrecomp-bios not found (required for OpenBIOS regen in wizard)" >&2
   exit 1
 fi
 mkdir -p "${STAGE}/psxrecomp/recompiler/build"
 cp -a "${GAME_BIN}" \
   "${STAGE}/psxrecomp/recompiler/build/$(basename "${GAME_BIN}")"
+cp -a "${BIOS_BIN}" \
+  "${STAGE}/psxrecomp/recompiler/build/$(basename "${BIOS_BIN}")"
 chmod +x "${STAGE}/psxrecomp/recompiler/build/$(basename "${GAME_BIN}")" 2>/dev/null || true
+chmod +x "${STAGE}/psxrecomp/recompiler/build/$(basename "${BIOS_BIN}")" 2>/dev/null || true
+
+# RetComM / CLI marker (same fields as the slim tools pack).
+cat >"${STAGE}/psxrecomp/retcomm-sdk.json" <<'EOF'
+{
+  "cli": "psxrecomp_cli.py",
+  "id": "psxrecomp-tools",
+  "game_bin": "recompiler/build/psxrecomp-game",
+  "bios_bin": "recompiler/build/psxrecomp-bios"
+}
+EOF
+
+# OpenBIOS profiles required for first-run generate without a retail dump.
+for f in OpenBIOS.toml openbios.bin OpenBIOS.LICENSE SCPH1001.toml; do
+  if [[ ! -f "${STAGE}/psxrecomp/bios/${f}" ]]; then
+    echo "error: missing psxrecomp/bios/${f} in staged tree" >&2
+    exit 1
+  fi
+done
+if [[ ! -f "${STAGE}/psxrecomp/psxrecomp_cli.py" ]]; then
+  echo "error: missing psxrecomp/psxrecomp_cli.py (overlay psxrecomp-sdk before pack)" >&2
+  exit 1
+fi
 
 # Optional bundled toolchain (cmake/ninja/compiler pack root).
 if [[ -n "${BPE_TOOLCHAIN_DIR:-}" && -d "${BPE_TOOLCHAIN_DIR}" ]]; then
@@ -185,7 +236,7 @@ if [[ -n "${BPE_TOOLCHAIN_DIR:-}" && -d "${BPE_TOOLCHAIN_DIR}" ]]; then
   echo "bundled toolchain from ${BPE_TOOLCHAIN_DIR}"
 fi
 
-# Never ship game generated C or disc/BIOS.
+# Never ship game generated C or retail BIOS dumps.
 rm -rf "${STAGE}/generated" "${STAGE}/bpe"
 rm -f "${STAGE}/psxrecomp/bios/SCPH1001.BIN" \
       "${STAGE}/psxrecomp/bios/SCPH1001.bin" 2>/dev/null || true
@@ -220,21 +271,24 @@ if [[ "${EXE_BASENAME}" == *.exe ]]; then
 fi
 
 cat >"${STAGE}/README-SETUP.txt" <<EOF
-Bomberman Party Edition Recompiled ${VERSION} — setup host
+Bomberman Party Edition Recompiled ${VERSION} — setup package
 Platform: ${ARTIFACT_TAG}
 
-This package does NOT include recompiled game C, a BIOS, or a disc image.
+One zip for first install and updates. Does NOT include disc images, retail
+BIOS dumps, or pre-generated game C.
 
-1. Install Python 3 (for psxrecomp_cli.py).
-2. Ensure a C/C++ toolchain is on PATH, or use ./toolchain (if bundled):
+Standalone:
+1. Install Python 3.
+2. Ensure cmake + a C/C++ toolchain are on PATH, or use ./toolchain if bundled:
      . ./toolchain/env.sh          # Linux/macOS
 3. Run ${EXE_BASENAME}
-4. Pick your legally owned Bomberman Party Edition disc.
-5. Click Generate & rebuild — sources land in generated/, then cmake builds
-   the playable binary under build-release/ and relaunches it.
+4. Provide your legally owned Bomberman Party Edition disc (and optional
+   retail SCPH-1001 BIOS; otherwise OpenBIOS is regenerated locally).
+5. Follow the Generate & rebuild wizard.
 
-RetComM can drive the same flow via psxrecomp/psxrecomp_cli.py
-(see psxrecomp/docs/LOCAL_CODEGEN_SDK.md).
+RetComM uses this same zip: it promotes tools into a shared SDK cache,
+prunes duplicate binaries from the game tree, and rebuilds cleanly while
+preserving saves and user config (settings.toml, etc.).
 EOF
 
 (
