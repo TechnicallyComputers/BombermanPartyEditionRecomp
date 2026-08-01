@@ -157,6 +157,15 @@ jobs:
         run: |
           brew install cmake ninja pkg-config sdl3 || brew install cmake ninja pkg-config sdl2
 
+      # Windows emitters: llvm-mingw from cmake-clang-v1 (static CLI, no MSYS2
+      # libgcc/libstdc++ harvest). Pack is for the build machine only — the
+      # setup zip stays lean (--allow-no-toolchain).
+      - name: Fetch portable toolchain (Windows emitters)
+        if: runner.os == 'Windows'
+        uses: ./psxrecomp/.github/actions/fetch-toolchain
+        with:
+          artifact: ${{ matrix.artifact }}
+
       - name: Build recompiler tools (game + bios emitters)
         uses: ./psxrecomp/.github/actions/build-emitters
 
