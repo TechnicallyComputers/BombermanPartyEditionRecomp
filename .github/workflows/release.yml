@@ -145,6 +145,7 @@ jobs:
             mingw-w64-x86_64-ninja
             mingw-w64-x86_64-SDL2
             mingw-w64-x86_64-pkgconf
+            curl
             zip
 
       - name: Install deps (Linux)
@@ -209,19 +210,37 @@ jobs:
         run: |
           set -euo pipefail
           case "${{ matrix.artifact }}" in
-            linux-x64) PATTERN='cmake-clang-v1*linux*.zip' ;;
-            windows-x64) PATTERN='cmake-clang-v1*windows*.zip' ;;
-            macos-arm64|macos-x64) PATTERN='cmake-clang-v1*macos*.zip' ;;
+            linux-x64)
+              PATTERN='cmake-clang-v1*linux*.zip'
+              ASSET_NAME='cmake-clang-v1-linux-x64.zip'
+              ;;
+            windows-x64)
+              PATTERN='cmake-clang-v1*windows*.zip'
+              ASSET_NAME='cmake-clang-v1-windows-x64.zip'
+              ;;
+            macos-arm64|macos-x64)
+              PATTERN='cmake-clang-v1*macos*.zip'
+              ASSET_NAME='cmake-clang-v1-macos-universal.zip'
+              ;;
             *) echo "::error::unknown artifact ${{ matrix.artifact }}"; exit 1 ;;
           esac
           rm -rf .cache/toolchain-dl .cache/toolchain-pack
           mkdir -p .cache/toolchain-dl .cache/toolchain-pack
           # Public retcomm-toolchains release (same packs RetComM used to fetch).
+          # Prefer gh when on PATH (Linux/macOS runners); MSYS2 Windows often
+          # lacks gh — fall back to the known latest-download URL + curl.
           if command -v gh >/dev/null 2>&1; then
             gh release download -R TechnicallyComputers/retcomm-toolchains \
               -p "${PATTERN}" -D .cache/toolchain-dl --clobber
+          elif command -v curl >/dev/null 2>&1; then
+            ASSET_URL="https://github.com/TechnicallyComputers/retcomm-toolchains/releases/latest/download/${ASSET_NAME}"
+            echo "gh not on PATH; curling ${ASSET_URL}"
+            curl -fsSL \
+              ${GH_TOKEN:+-H "Authorization: Bearer ${GH_TOKEN}"} \
+              -o ".cache/toolchain-dl/${ASSET_NAME}" \
+              "${ASSET_URL}"
           else
-            echo "::error::gh CLI required to fetch toolchain pack"
+            echo "::error::neither gh nor curl available to fetch toolchain pack"
             exit 1
           fi
           ZIP="$(find .cache/toolchain-dl -maxdepth 1 -type f -name '*.zip' | head -n1)"
