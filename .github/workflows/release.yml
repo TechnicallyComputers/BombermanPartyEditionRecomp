@@ -215,12 +215,42 @@ jobs:
           if [[ -n "${CMAKE_OSX_DEPLOYMENT_TARGET:-}" ]]; then
             EXTRA+=("-DCMAKE_OSX_DEPLOYMENT_TARGET=${CMAKE_OSX_DEPLOYMENT_TARGET}")
           fi
-          # Homebrew Vulkan headers live under $(brew --prefix)/include; point
-          # CMake's find_path/find_program there when VULKAN_SDK is unset.
+          # Point CMake at Vulkan headers/glslc. Prefer VULKAN_SDK layout
+          # (runtime.cmake checks $VULKAN_SDK first); also seed CMAKE_PREFIX_PATH
+          # so find_path works after the empty-_vk_inc fix in runtime.cmake.
           if [[ "$(uname -s)" == "Darwin" ]]; then
             BREW_PREFIX="$(brew --prefix)"
             export PATH="${BREW_PREFIX}/bin${PATH:+:${PATH}}"
-            export CMAKE_PREFIX_PATH="${BREW_PREFIX}${CMAKE_PREFIX_PATH:+:${CMAKE_PREFIX_PATH}}"
+            if command -v brew >/dev/null 2>&1; then
+              SHADERC_PREFIX="$(brew --prefix shaderc 2>/dev/null || true)"
+              VK_HDR_PREFIX="$(brew --prefix vulkan-headers 2>/dev/null || true)"
+              if [[ -n "${SHADERC_PREFIX}" && -d "${SHADERC_PREFIX}/bin" ]]; then
+                export PATH="${SHADERC_PREFIX}/bin:${PATH}"
+              fi
+              for p in "${VK_HDR_PREFIX}" "${SHADERC_PREFIX}" "${BREW_PREFIX}"; do
+                if [[ -n "${p}" && -d "${p}" ]]; then
+                  export CMAKE_PREFIX_PATH="${p}${CMAKE_PREFIX_PATH:+:${CMAKE_PREFIX_PATH}}"
+                fi
+              done
+            else
+              export CMAKE_PREFIX_PATH="${BREW_PREFIX}${CMAKE_PREFIX_PATH:+:${CMAKE_PREFIX_PATH}}"
+            fi
+            if [[ -f "${BREW_PREFIX}/include/vulkan/vulkan.h" ]]; then
+              export VULKAN_SDK="${BREW_PREFIX}"
+            elif [[ -n "${VK_HDR_PREFIX:-}" && -f "${VK_HDR_PREFIX}/include/vulkan/vulkan.h" ]]; then
+              export VULKAN_SDK="${VK_HDR_PREFIX}"
+            fi
+          elif [[ "$(uname -s)" == "Linux" ]]; then
+            if [[ -z "${VULKAN_SDK:-}" && -f /usr/include/vulkan/vulkan.h ]]; then
+              export VULKAN_SDK=/usr
+            fi
+          elif [[ "$(uname -s)" == MINGW* || "$(uname -s)" == MSYS* ]]; then
+            if [[ -z "${VULKAN_SDK:-}" && -f /mingw64/include/vulkan/vulkan.h ]]; then
+              export VULKAN_SDK=/mingw64
+            fi
+          fi
+          if command -v glslc >/dev/null 2>&1; then
+            EXTRA+=("-DGLSLC_EXE=$(command -v glslc)")
           fi
           JOBS="$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)"
           cmake -S . -B build-ci -G Ninja \
