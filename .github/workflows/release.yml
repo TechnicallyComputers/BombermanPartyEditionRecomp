@@ -358,7 +358,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.prepare.outputs.tag }}
-          name: Bomberman Party Edition ${{ needs.prepare.outputs.tag }}
+          name: "Bomberman Party Edition ${{ needs.prepare.outputs.tag }}"
           files: |
             dist/bpe-*.zip
           generate_release_notes: true
