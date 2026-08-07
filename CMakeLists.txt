@@ -49,6 +49,13 @@ option(BPE_REQUIRE_GAME_C
 
 set(PSXRECOMP_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/psxrecomp" CACHE PATH
     "Path to psxrecomp")
+# Opt in before include(runtime.cmake) so recomp-net is discovered/linked at
+# parse time (ENABLE_NETPLAY_IF_PRESENT alone is too late — option(PSX_NETPLAY)
+# already ran OFF).
+if(EXISTS "${PSXRECOMP_ROOT}/lib/recomp-net/CMakeLists.txt")
+    set(PSX_NETPLAY ON CACHE BOOL
+        "Link recomp-net delay-sync (opt-in; needs recomp-net)" FORCE)
+endif()
 include("${PSXRECOMP_ROOT}/runtime/runtime.cmake")
 
 psxrecomp_add_game_runtime(psx-runtime

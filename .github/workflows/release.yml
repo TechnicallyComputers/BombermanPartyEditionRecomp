@@ -256,10 +256,13 @@ jobs:
           # Title root codegen_setup.c must define
           # psx_game_codegen_forward_if_built (see codegen_setup.c.in) or link
           # fails — main.cpp always calls it, including setup-host CI builds.
+          # Netplay: CMakeLists must set PSX_NETPLAY before include(runtime.cmake);
+          # -DPSX_NETPLAY=ON here is belt-and-suspenders for CI.
           cmake -S . -B build-ci -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DPSXRECOMP_FORCE_SETUP_HOST=ON \
             -DPSXRECOMP_ALLOW_NO_BIOS=ON \
+            -DPSX_NETPLAY=ON \
             -DPSX_GAME_VERSION="${BPE_RELEASE_VERSION}" \
             "${EXTRA[@]}" 2>&1 | tee build-ci-configure.log
           if ! grep -q 'Vulkan backend: headers' build-ci-configure.log; then
