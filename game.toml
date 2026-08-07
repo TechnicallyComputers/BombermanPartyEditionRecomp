@@ -54,7 +54,9 @@ renderer = "opengl"
 aspect_ratio = "4:3"
 
 [controller]
-default_mode = "digital"
+# P1 (lone pad on Port 1) supports DualShock; multitap taps stay digital
+# unless multitap_analog is enabled (opt-in hack).
+default_mode = "analog"
 allow_hybrid = false
 # Default stick deadzone ~10% (raw SDL units). Per-player overrides live in
 # settings.toml as pN_deadzone.
@@ -62,3 +64,6 @@ deadzone = 3277
 # Bomberman Party Edition needs the SCPH-1070 on console Port 2 (P1 stays a
 # normal pad on Port 1). Empty tap slots are fine — one controller is enough.
 multitap_port = 2
+# DualShock-on-tap seats (not faithful). Off by default — BPE expects digital
+# taps. Enable from the launcher Controllers / Lobby Settings when needed.
+multitap_analog = false
