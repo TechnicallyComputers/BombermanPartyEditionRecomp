@@ -38,3 +38,7 @@ void psx_game_codegen_setup_apply(RecompLauncherCGameInfo* gi) {
 void psx_game_codegen_relaunch_or_exit(const char* disc_path) {
     psxrecomp_codegen_host_relaunch_or_exit(disc_path);
 }
+
+void psx_game_codegen_forward_if_built(int argc, char** argv) {
+    psxrecomp_codegen_host_forward_if_built(&kBpeCodegenConfig, argc, argv);
+}

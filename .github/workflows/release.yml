@@ -253,6 +253,9 @@ jobs:
             EXTRA+=("-DGLSLC_EXE=$(command -v glslc)")
           fi
           JOBS="$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)"
+          # Title root codegen_setup.c must define
+          # psx_game_codegen_forward_if_built (see codegen_setup.c.in) or link
+          # fails — main.cpp always calls it, including setup-host CI builds.
           cmake -S . -B build-ci -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DPSXRECOMP_FORCE_SETUP_HOST=ON \
