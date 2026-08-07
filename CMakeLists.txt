@@ -56,10 +56,14 @@ if(EXISTS "${PSXRECOMP_ROOT}/lib/recomp-net/CMakeLists.txt")
     set(PSX_NETPLAY ON CACHE BOOL
         "Link recomp-net delay-sync (opt-in; needs recomp-net)" FORCE)
 endif()
+# Self-build first-run wizard + Generate & rebuild (required for setup-host CI).
+set(PSX_SETUP_WIZARD ON CACHE BOOL
+    "Advertise first-run setup wizard + Generate & rebuild in recomp-ui" FORCE)
 include("${PSXRECOMP_ROOT}/runtime/runtime.cmake")
 
 psxrecomp_add_game_runtime(psx-runtime
     ENABLE_NETPLAY_IF_PRESENT
+    ENABLE_SETUP_WIZARD
     WINDOW_TITLE "Bomberman Party Edition Recompiled"
     DEFAULT_GAME_CONFIG_PATH "game.toml"
     LAUNCHER_BOXART "${CMAKE_CURRENT_SOURCE_DIR}/launcher_assets/img/boxart.tga"
