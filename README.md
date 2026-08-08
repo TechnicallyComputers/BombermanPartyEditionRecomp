@@ -171,6 +171,9 @@ for netplay when `slot_count >= 3`. Default tap is console Port 1; set
 `[controller] multitap_port = 2` for titles that need the tap on Port 2
 (Bomberman Party Edition). Bulk polls follow the real TAP/REQ latch.
 
+Pads are **digital-only** (`default_mode = "digital"`, `lock_mode = true`);
+DualShock / `multitap_analog` are not supported for this title.
+
 ## Framework pin
 
 Both framework submodules track **`mstan` `master`**:
