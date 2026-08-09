@@ -253,6 +253,13 @@ jobs:
             EXTRA+=("-DGLSLC_EXE=$(command -v glslc)")
           fi
           JOBS="$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)"
+          # Emitters may have set PSXRECOMP_TOOLCHAIN_DIR (llvm-mingw) via
+          # GITHUB_ENV. Clear it before the MSYS2 g++ setup-host configure so
+          # pack lib/ cannot win -L for -static-libstdc++ (codecvt link errors).
+          if [[ "$(uname -s)" == MINGW* || "$(uname -s)" == MSYS* ]]; then
+            unset PSXRECOMP_TOOLCHAIN_DIR TOOLCHAIN_DIR BPE_TOOLCHAIN_DIR RETCOMM_TOOLCHAIN_DIR || true
+            unset CMAKE_PREFIX_PATH SDL3_DIR ZLIB_ROOT || true
+          fi
           # Title root codegen_setup.c must define
           # psx_game_codegen_forward_if_built (see codegen_setup.c.in) or link
           # fails — main.cpp always calls it, including setup-host CI builds.
