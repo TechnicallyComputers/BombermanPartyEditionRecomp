@@ -56,13 +56,13 @@ aspect_ratio = "4:3"
 [controller]
 # BPE is digital-pad only (libpad does not use DualShock). Lock the mode so
 # settings.toml / the launcher cannot revive analog or hybrid.
-default_mode = "analog"
+default_mode = "digital"
 allow_hybrid = false
-lock_mode = false
+lock_mode = true
 # Stick→button deadzone (raw SDL units). Per-player overrides: settings.toml.
 deadzone = 3277
 # SCPH-1070 on console Port 2 (P1 stays a plain pad on Port 1). Empty tap
 # slots are fine — one controller is enough.
 multitap_port = 2
 # DualShock-on-tap seats are unsupported for this title.
-multitap_analog = true
+multitap_analog = false
