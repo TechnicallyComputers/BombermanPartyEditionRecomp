@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# BPE thin wrapper around the shared psxrecomp setup-host packager.
+# Thin wrapper around the shared psxrecomp setup-host packager.
+# Autofilled by tools/new_project_layout/setup_project.{sh,ps1}.
 #
 # Usage:
 #   scripts/package_setup_release.sh <build-dir> <artifact-tag> [recompiler-build-dir]
@@ -24,6 +25,14 @@ if [[ ! -f "${PACKAGER}" ]]; then
 fi
 chmod +x "${PACKAGER}" 2>/dev/null || true
 
+EXTRA_PROJECT=()
+if [[ -f "${ROOT}/catalog_identity.json" ]]; then
+  EXTRA_PROJECT+=(--project-file catalog_identity.json)
+fi
+if [[ -f "${ROOT}/framework_pins.txt" ]]; then
+  EXTRA_PROJECT+=(--project-file framework_pins.txt)
+fi
+
 cd "${ROOT}"
 exec bash "${PACKAGER}" \
   --root "${ROOT}" \
@@ -33,14 +42,14 @@ exec bash "${PACKAGER}" \
   --exe-name Bomberman_Party_Edition_Recompiled \
   --display-name "Bomberman Party Edition Recompiled" \
   --recompiler-build "${RECOMPILER_BUILD}" \
-  --version-env BPE_RELEASE_VERSION \
-  --disc-hint "your legally owned Bomberman Party Edition disc" \
+  --version-env RELEASE_VERSION \
+  --disc-hint "your legally owned BombermanPartyEdition disc" \
   --project-file CMakeLists.txt \
   --project-file game.toml \
   --project-file VERSION \
   --project-file codegen_setup.c \
   --project-file codegen_setup.h \
-  --project-file DISC.md \
   --project-file README.md \
   --project-dir seeds \
-  --project-dir launcher_assets
+  --project-dir launcher_assets \
+  "${EXTRA_PROJECT[@]}"
