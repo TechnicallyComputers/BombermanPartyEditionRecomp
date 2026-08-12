@@ -1,28 +1,29 @@
+# Autofilled by tools/new_project_layout/probe_disc.py from your legal dump.
+# Review before shipping. Runtime quirks / overlay seeds still need hand work.
+
 [game]
-name = "Bomberman Party Edition"
+name = "BombermanPartyEditionRecomp"
 id = "SLUS-01189"
 players = 5
-exe = "bpe/SLUS_011.89"
-disc = "bpe/Bomberman Party Edition.bin"
+exe = "disc/SLUS_011.89"
+disc = "disc/Bomberman - Party Edition (USA).cue"
 load_address = "0x80010000"
 entry_pc = "0x800785D8"
 text_size = "0x00083800"
 stack_base = "0x801FFFF0"
 
-# Disc normalize via psxrecomp/tools/prepare_disc.py (Redump bin/cue or cooked ISO).
+# Digests are for data Track 01 (first BINARY FILE / TRACK 01).
 [prepare_disc]
-out_dir = "bpe"
-bin_name = "Bomberman Party Edition.bin"
-cue_name = "Bomberman Party Edition.cue"
+out_dir = "disc"
+bin_name = "Bomberman - Party Edition (USA).bin"
+cue_name = "Bomberman - Party Edition (USA).cue"
 boot_exe = "SLUS_011.89"
-known_sizes = [660770880, 575365120]
+known_sizes = [660770880]
 known_md5 = [
   "e0ceba6e448677f3d938b1dd176be3af",
-  "13cf2c80a2811015d604ecf4496c3287",
 ]
 known_sha1 = [
   "53a509dbe859f773856f26d966f5edacbc701b4e",
-  "4735882768678923796f62878c05f7f0e81308d5",
 ]
 
 [recompiler]
@@ -30,39 +31,20 @@ seeds = "seeds/ghidra_funcs.txt"
 out_dir = "generated"
 strict = true
 
-# Local PGO during generate/rebuild is off for BPE (plain Release is enough).
-# Framework still supports [pgo] enabled=true for other titles / manual trains.
-[pgo]
-enabled = false
-
 [runtime]
-debug_port = 4530
-window_title = "Bomberman Party Edition Recompiled"
+window_title = "BombermanPartyEditionRecomp Recompiled"
 memcard_dir = "saves"
-disc_speed = "4x"
-bios_hle = true
-bios_hle_keep_intro = false
-fast_boot = false
-overlay_cache = true
-overlay_backend = "auto"
-turbo_loads = true
-turbo_audio_sink = true
-idle_skip = true
 
 [video]
 renderer = "opengl"
 aspect_ratio = "4:3"
 
 [controller]
-# BPE is digital-pad only (libpad does not use DualShock). Lock the mode so
-# settings.toml / the launcher cannot revive analog or hybrid.
-default_mode = "analog"
-allow_hybrid = false
-lock_mode = false
-# Stick→button deadzone (raw SDL units). Per-player overrides: settings.toml.
-deadzone = 3277
-# SCPH-1070 on console Port 2 (P1 stays a plain pad on Port 1). Empty tap
-# slots are fine — one controller is enough.
-multitap_port = 2
-# DualShock-on-tap seats are unsupported for this title.
-multitap_analog = true
+default_mode = "digital"
+
+# Online mount gate: digests + track count + optional TOC fingerprint
+# (see docs/NETPLAY.md).
+[netplay]
+require_cue = true
+required_tracks = 1
+required_disc_fp = "63a2db3f579cef30826d58e982ee7ac383b33e5f9afb0c3f4d19c8cf3db3c41d"
