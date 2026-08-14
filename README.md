@@ -222,3 +222,15 @@ launcher is the repo-root **`recomp-ui`** submodule. Lobby server counterpart:
 
 Generated game C + Release/`MAX_PLAYERS 5` runtime build. LLE boot reaches the
 SCEA license screen; title/menu bring-up continues — see `ISSUES.md`.
+
+<!-- retcomm-readme-raid -->
+---
+
+<p align="center">
+  <sub><b>R.A.I.D. — Retro AI Development</b> · a Discord for AI-assisted retro reverse-engineering, decomp &amp; recomp</sub>
+</p>
+
+<p align="center">
+  <a href="https://discord.gg/Ad9BwSzctP"><img src=".github/raid-discord.png" alt="Join the Retro AI Development (R.A.I.D.) Discord" width="200"></a>
+</p>
+<!-- /retcomm-readme-raid -->
