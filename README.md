@@ -4,11 +4,6 @@
 [![GitHub downloads (all assets, all releases)](https://img.shields.io/github/downloads/TechnicallyComputers/BombermanPartyEditionRecomp/total)](https://github.com/TechnicallyComputers/BombermanPartyEditionRecomp/releases)
 [![GitHub downloads (latest release)](https://img.shields.io/github/downloads/TechnicallyComputers/BombermanPartyEditionRecomp/latest/total)](https://github.com/TechnicallyComputers/BombermanPartyEditionRecomp/releases/latest)
 [![GitHub release](https://img.shields.io/github/v/release/TechnicallyComputers/BombermanPartyEditionRecomp)](https://github.com/TechnicallyComputers/BombermanPartyEditionRecomp/releases/latest)
-
-[![Linux](https://img.shields.io/github/downloads/TechnicallyComputers/BombermanPartyEditionRecomp/latest/bpe-%2A-linux-x64.zip)](https://github.com/TechnicallyComputers/BombermanPartyEditionRecomp/releases/latest)
-[![Windows](https://img.shields.io/github/downloads/TechnicallyComputers/BombermanPartyEditionRecomp/latest/bpe-%2A-windows-x64.zip)](https://github.com/TechnicallyComputers/BombermanPartyEditionRecomp/releases/latest)
-[![macOS arm64](https://img.shields.io/github/downloads/TechnicallyComputers/BombermanPartyEditionRecomp/latest/bpe-%2A-macos-arm64.zip)](https://github.com/TechnicallyComputers/BombermanPartyEditionRecomp/releases/latest)
-[![macOS x64](https://img.shields.io/github/downloads/TechnicallyComputers/BombermanPartyEditionRecomp/latest/bpe-%2A-macos-x64.zip)](https://github.com/TechnicallyComputers/BombermanPartyEditionRecomp/releases/latest)
 <!-- /retcomm-readme-metrics -->
 
 *Bomberman Party Edition* (USA, **SLUS-01189**) — game project for
