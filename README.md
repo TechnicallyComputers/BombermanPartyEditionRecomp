@@ -1,5 +1,16 @@
 # BombermanPartyEditionRecomp
 
+<!-- retcomm-readme-metrics -->
+[![GitHub downloads (all assets, all releases)](https://img.shields.io/github/downloads/TechnicallyComputers/BombermanPartyEditionRecomp/total)](https://github.com/TechnicallyComputers/BombermanPartyEditionRecomp/releases)
+[![GitHub downloads (latest release)](https://img.shields.io/github/downloads/TechnicallyComputers/BombermanPartyEditionRecomp/latest/total)](https://github.com/TechnicallyComputers/BombermanPartyEditionRecomp/releases/latest)
+[![GitHub release](https://img.shields.io/github/v/release/TechnicallyComputers/BombermanPartyEditionRecomp)](https://github.com/TechnicallyComputers/BombermanPartyEditionRecomp/releases/latest)
+
+[![Linux](https://img.shields.io/github/downloads/TechnicallyComputers/BombermanPartyEditionRecomp/latest/bpe-%2A-linux-x64.zip)](https://github.com/TechnicallyComputers/BombermanPartyEditionRecomp/releases/latest)
+[![Windows](https://img.shields.io/github/downloads/TechnicallyComputers/BombermanPartyEditionRecomp/latest/bpe-%2A-windows-x64.zip)](https://github.com/TechnicallyComputers/BombermanPartyEditionRecomp/releases/latest)
+[![macOS arm64](https://img.shields.io/github/downloads/TechnicallyComputers/BombermanPartyEditionRecomp/latest/bpe-%2A-macos-arm64.zip)](https://github.com/TechnicallyComputers/BombermanPartyEditionRecomp/releases/latest)
+[![macOS x64](https://img.shields.io/github/downloads/TechnicallyComputers/BombermanPartyEditionRecomp/latest/bpe-%2A-macos-x64.zip)](https://github.com/TechnicallyComputers/BombermanPartyEditionRecomp/releases/latest)
+<!-- /retcomm-readme-metrics -->
+
 *Bomberman Party Edition* (USA, **SLUS-01189**) — game project for
 [PSXRecomp](https://github.com/mstan/psxrecomp).
 
@@ -7,6 +18,7 @@ Holds game config, seeds, and build glue. CI ships a **setup host** (no game
 `generated/` in the zip); users generate locally from a legal disc. Disc images
 and BIOS stay local and gitignored.
 
+<!-- retcomm-readme-launcher -->
 ## RetComM Launcher
 
 You can run this title **standalone** (release zip + the built-in recomp-ui
@@ -29,6 +41,7 @@ the Retro Compilation Manager hub for self-compiling recomps.
 RetComM checks for updates, rebuilds with existing build data when possible,
 shares the portable toolchain used by per-title launchers, and automates
 BIOS/ROM/save plumbing so you are not stuck repeating each game’s wizard by hand.
+<!-- /retcomm-readme-launcher -->
 
 ## Layout
 
