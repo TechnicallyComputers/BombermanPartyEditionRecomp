@@ -6,6 +6,12 @@
 [![GitHub release](https://img.shields.io/github/v/release/TechnicallyComputers/BombermanPartyEditionRecomp)](https://github.com/TechnicallyComputers/BombermanPartyEditionRecomp/releases/latest)
 <!-- /retcomm-readme-metrics -->
 
+<!-- retcomm-readme-boxart -->
+<p align="center">
+  <img src="launcher_assets/img/boxart.png" alt="BombermanPartyEdition box art" width="280">
+</p>
+<!-- /retcomm-readme-boxart -->
+
 *Bomberman Party Edition* (USA, **SLUS-01189**) — game project for
 [PSXRecomp](https://github.com/mstan/psxrecomp).
 
