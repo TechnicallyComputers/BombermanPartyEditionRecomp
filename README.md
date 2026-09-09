@@ -20,26 +20,26 @@ Holds game config, seeds, and build glue. CI ships a **setup host** (no game
 and BIOS stay local and gitignored.
 
 <!-- retcomm-readme-launcher -->
-## RetComM Launcher
+## Retro Launcher
 
 You can run this title **standalone** (release zip + the built-in recomp-ui
 Generate & Build flow), or manage installs, updates, ROM/BIOS wiring, and queued
 builds more intuitively with
-**[RetComM Launcher](https://github.com/TechnicallyComputers/RetComM-Launcher)** —
+**[Retro Launcher](https://github.com/RetroPortingToolKit/Retro-Launcher)** —
 the Retro Compilation Manager hub for self-compiling recomps.
 
-[Downloads](https://github.com/TechnicallyComputers/RetComM-Launcher/releases) ·
-[Full README & features](https://github.com/TechnicallyComputers/RetComM-Launcher#readme)
+[Downloads](https://github.com/RetroPortingToolKit/Retro-Launcher/releases) ·
+[Full README & features](https://github.com/RetroPortingToolKit/Retro-Launcher#readme)
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/TechnicallyComputers/RetComM-Launcher/main/docs/screenshots/hub-and-game-launcher.png" alt="RetComM hub with a background build, next to a title’s recomp-ui launcher" width="720">
+  <img src="https://raw.githubusercontent.com/RetroPortingToolKit/Retro-Launcher/main/docs/screenshots/hub-and-game-launcher.png" alt="Retro hub with a background build, next to a title’s recomp-ui launcher" width="720">
 </p>
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/TechnicallyComputers/RetComM-Launcher/main/docs/screenshots/queue-and-background-build.png" alt="Background cmake build with titles queued" width="720">
+  <img src="https://raw.githubusercontent.com/RetroPortingToolKit/Retro-Launcher/main/docs/screenshots/queue-and-background-build.png" alt="Background cmake build with titles queued" width="720">
 </p>
 
-RetComM checks for updates, rebuilds with existing build data when possible,
+Retro checks for updates, rebuilds with existing build data when possible,
 shares the portable toolchain used by per-title launchers, and automates
 BIOS/ROM/save plumbing so you are not stuck repeating each game’s wizard by hand.
 <!-- /retcomm-readme-launcher -->
@@ -141,7 +141,7 @@ rebuild UI and no linked BIOS backends. First-run generate emits OpenBIOS
 
 Release zips use `scripts/package_setup_release.sh` and embed
 `psxrecomp-game` + `psxrecomp-bios` (plus the CLI) inside `psxrecomp/`, but
-not a portable `toolchain/`. RetComM / the wizard download `cmake-clang-v1`
+not a portable `toolchain/`. Retro / the wizard download `cmake-clang-v1`
 from `retcomm-toolchains`, or accept an offline zip /
 `RETCOMM_TOOLCHAIN_DIR`. CI has no BIOS dump / private-asset dependency.
 
