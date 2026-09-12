@@ -1,0 +1,64 @@
+# Automatch rulesets — Bomberman Party Edition (PSX, SLUS-01189).
+#
+# Deployment data, not source: the live file on the lobby server is
+# `data/automatch_rulesets.toml` and is gitignored there. Copy this in, or
+# point AUTOMATCH_RULESETS_PATH at it. There is no enable flag — automatch is
+# on when at least one usable ruleset loads for a title, and off when none
+# does (recomp-net-server docs/AUTOMATCH.md §4, §14).
+#
+# `game_name` must match BYTE FOR BYTE what the client announces. The PSX
+# runtime announces `[game] name` from game.toml, and it is visible on the
+# wire in the client's own log line:
+#     psx_lobby: hello as "…" for game "BombermanPartyEditionRecomp"
+# A near-miss here is not an error anywhere — the title simply has no rulesets
+# and automatch_available answers no, which looks exactly like automatch off.
+#
+# The disc fingerprint the queue keys on is `[netplay] required_disc_fp`
+# (psxrecomp-toc-v1); the server never sees a disc, only that both tickets
+# carry the same 64 hex characters.
+
+[[ruleset]]
+id        = "standard"
+label     = "Standard"
+game_name = "BombermanPartyEditionRecomp"
+max_slots = 2      # v1 refuses anything else at load, loudly. The game seats
+                   # five; automatch pairs two, in a two-seat room.
+
+# `game_version` is deliberately OMITTED. Pinning it would restrict the queue
+# to one release; leaving it out still pools only players on the SAME release,
+# because the match key is an equality bucket either way (AUTOMATCH.md §3).
+# Omitting it means a new tagged release starts pooling without a server edit.
+
+[ruleset.match_caps]
+# THE PSX CAPS SHAPE: the keys psxrecomp/runtime/src/psx_lobby_client.c
+# parses out of match_caps (ingest_match_caps_from_json). The SNES keys
+# (widescreen, widescreen_hud, ws_extra) mean nothing to this client.
+#
+# Every value is written out even where it equals the client-side default,
+# because the server OWNS these caps for an automatch room — a key left out is
+# a decision made by whichever default happens to be in the peer's build.
+v                 = 1
+aspect_num        = 4       # 4:3 -- the wide views are host settings, not a queue's
+aspect_den        = 3
+input_delay       = 2       # frames; the server raises it from the measured RTT
+input_prediction  = 6       # rollback runway; raised with the delay
+rollback          = true    # the SFU path both peers run online
+force_input_relay = false
+force_turn        = false   # let ICE pick; the relay is already in the path
+turbo_loads       = false   # vanilla: load timing is simulation state
+bios_hle          = false   # recompiled BIOS on both sides, never HLE
+fast_boot         = false
+auto_skip_fmv     = false
+multitap_analog   = false   # matches game.toml [controller] multitap_analog
+guest_memcard     = true    # a guest may bring their own slot-1 card, as a hosted
+                            # room allows by default (g_lnch_guest_memcard = 1)
+language          = "en"
+
+# No `mods` key and no `mod_plan`: v1 is vanilla only, and a `mods` key is
+# refused at load rather than at match time. This runtime clears the mod plan
+# for every netplay launch anyway (mod_runtime_clear_for_netplay) and refuses
+# to start if it cannot, so `mods_enabled` on a PSX ticket is always false.
+#
+# No `mod_cosmetic_allow`: the PSX runtime has no cosmetic-exemption mechanism,
+# so there is nothing a queued player could run unilaterally to grant here.
+# Omitting the key grants NOTHING, which is the correct default.

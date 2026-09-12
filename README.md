@@ -56,6 +56,7 @@ BIOS/ROM/save plumbing so you are not stuck repeating each game’s wizard by ha
 | `generated/` | Local recompiler output (created by Generate & rebuild; not required for CI setup host) |
 | `VERSION` | Release / lobby match pin (e.g. `0.1.1`) |
 | `DISC.md` | Disc identity + hashes |
+| `docs/automatch_rulesets.bpe.toml` | Lobby-server automatch ruleset for this title (deployment data; see recomp-net-server `docs/AUTOMATCH.md`) |
 | `psxrecomp/tools/prepare_disc.py` | Framework disc normalize (config from `game.toml`) |
 | `tools/prepare_disc.py` | Thin wrapper → framework tool |
 
